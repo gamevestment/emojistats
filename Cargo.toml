@@ -1,0 +1,6 @@
+[package]
+name = "emojistats"
+version = "0.1.0"
+authors = ["Jonathan Kim <jkim8192@gmail.com>"]
+
+[dependencies]

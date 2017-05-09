@@ -1,0 +1,14 @@
+[database]
+host = ""
+port = 5432 # PostgreSQL
+user = ""
+password = ""
+database = ""
+
+[bot]
+# Valid values for auth_method: oauth2 | bot_token
+auth_method = "bot_token"
+
+# Pick one
+# oauth2_token = ""
+# bot_token = ""
