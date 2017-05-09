@@ -7,6 +7,12 @@ extern crate discord;
 
 use log4rs::encode::pattern::PatternEncoder;
 use std::process;
+use std::collections::HashMap;
+use discord::model::{
+    Event,
+    ChannelType
+};
+use discord::model::PossibleServer::Online;
 
 const PROGRAM_NAME: &'static str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -41,7 +47,7 @@ fn main() {
     let mut config = config::Config::new();
 
     match config.merge(config::File::new(CONFIG_FILE, config::FileFormat::Toml)) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(err) => {
             error!("{}", err);
             process::exit(1);
@@ -160,7 +166,7 @@ fn main() {
             );
             ";
         match db_conn.batch_execute(create_statements) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(err) => {
                 error!("{}", err);
                 process::exit(1);
@@ -187,12 +193,25 @@ fn main() {
 
     debug!("Connected to Discord");
 
+    let mut channels = HashMap::new();
+
     loop {
         match connection.recv_event() {
-            Ok(discord::model::Event::MessageCreate(message)) => {
+            Ok(Event::ServerCreate(Online(server))) => {
+                // Map text channel IDs to server IDs
+                for channel in &server.channels {
+                    match &channel.kind {
+                        &ChannelType::Text => {
+                            channels.insert(channel.id, server.id);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::MessageCreate(message)) => {
                 // If the message was set by a person-user, scrape the message for emojis
 
-                println!("{} says: {}", message.author.name, message.content);
+                println!("{} says in {}: {}", message.author.name, message.channel_id, message.content);
                 if message.content == "!test" {
                     let _ = bot.send_message(message.channel_id, "This is a reply to the test.", "", false);
                 } else if message.content == "!quit" {
@@ -201,7 +220,9 @@ fn main() {
                     break;
                 }
             }
-            Ok(_) => {}
+            Ok(something) => {
+                println!("Got something: {:?}", something);
+            }
             Err(discord::Error::Closed(code, body)) => {
                 println!("Gateway closed with code {:?}: {}", code, body);
                 break;
