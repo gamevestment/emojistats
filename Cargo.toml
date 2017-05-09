@@ -16,3 +16,7 @@ features = ["file_appender", "pattern_encoder"]
 [dependencies.discord]
 version = "0.8"
 default-features = false
+
+[dependencies.postgres]
+version = "0.14"
+default-features = false

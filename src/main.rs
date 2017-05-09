@@ -2,6 +2,7 @@
 extern crate log;
 extern crate log4rs;
 extern crate config;
+extern crate postgres;
 extern crate discord;
 
 use log4rs::encode::pattern::PatternEncoder;
@@ -26,7 +27,7 @@ fn main() {
                 .build("all", Box::new(log_file)))
             .build(log4rs::config::Root::builder()
                 .appender("all")
-                .build(log::LogLevelFilter::Info))
+                .build(log::LogLevelFilter::Debug))
             .unwrap();
 
         log4rs::init_config(log_config).unwrap();
@@ -43,73 +44,136 @@ fn main() {
         Ok(_) => {},
         Err(err) => {
             error!("{}", err);
-            process::exit(1)
+            process::exit(1);
         }
     }
 
-    let host = match config.get_str("database.host") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a database host.");
-            process::exit(1)
-        }
-    };
+    let db_conn_str: String;
+    let bot_token: String;
 
-    let port = match config.get_str("database.port") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a database port.");
-            process::exit(1)
-        }
-    };
+    {
+        let host = match config.get_str("database.host") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a database host.");
+                process::exit(1);
+            }
+        };
 
-    let user = match config.get_str("database.user") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a database username.");
-            process::exit(1)
-        }
-    };
+        let port = match config.get_str("database.port") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a database port.");
+                process::exit(1);
+            }
+        };
 
-    let password = match config.get_int("database.port") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a database password.");
-            process::exit(1)
-        }
-    };
+        let user = match config.get_str("database.user") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a database username.");
+                process::exit(1);
+            }
+        };
 
-    let database = match config.get_str("database.database") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a database name.");
-            process::exit(1)
-        }
-    };
+        let password = match config.get_str("database.password") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a database password.");
+                process::exit(1);
+            }
+        };
 
-    let bot_token = match config.get_str("bot.bot_token") {
-        Some(val) => val,
-        None => {
-            error!("The configuration is missing a bot token.");
-            process::exit(1)
-        }
-    };
+        let database = match config.get_str("database.database") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a database name.");
+                process::exit(1);
+            }
+        };
 
-    // Print config
-    println!("Host: {}", host);
-    println!("Port: {}", port);
-    println!("User: {}", user);
-    println!("Password: {}", password);
-    println!("Database: {}", database);
+        db_conn_str = format!("postgres://{user}:{password}@{host}:{port}/{database}",
+            user = user,
+            password = password,
+            host = host,
+            port = port,
+            database = database
+        );
+
+        debug!("Database connection string: postgres://{user}:{password}@{host}:{port}/{database}",
+            user = user,
+            password = "<PASSWORD_REDACTED>",
+            host = host,
+            port = port,
+            database = database
+        );
+
+        bot_token = match config.get_str("bot.bot_token") {
+            Some(val) => val,
+            None => {
+                error!("The configuration is missing a bot token.");
+                process::exit(1);
+            }
+        };
+    }
 
     // Connect to database
+    let db_conn = match postgres::Connection::connect(db_conn_str, postgres::TlsMode::None) {
+        Ok(conn) => {
+            debug!("Connected to database successfully");
+            conn
+        }
+        Err(err) => {
+            error!("{}", err);
+            process::exit(1);
+        }
+    };
+
+    // Create tables
+    {
+        let create_statements =
+            "
+            CREATE TABLE IF NOT EXISTS emoji (
+                id SERIAL,
+                discord_id NUMERIC NOT NULL,
+                name VARCHAR(512),
+                PRIMARY KEY (id)
+            );
+
+            CREATE TABLE IF NOT EXISTS message (
+                id NUMERIC,
+                guild_id NUMERIC NOT NULL,
+                channel_id NUMERIC NOT NULL,
+                user_id NUMERIC NOT NULL,
+                emoji_count NUMERIC NOT NULL,
+                PRIMARY KEY (id)
+            );
+
+            CREATE TABLE IF NOT EXISTS emoji_usage (
+                emoji_id INTEGER NOT NULL,
+                guild_id NUMERIC NOT NULL,
+                channel_id NUMERIC NOT NULL,
+                user_id NUMERIC NOT NULL,
+                use_count NUMERIC NOT NULL,
+                PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
+                FOREIGN KEY (emoji_id) REFERENCES emoji (id)
+            );
+            ";
+        match db_conn.batch_execute(create_statements) {
+            Ok(_) => {},
+            Err(err) => {
+                error!("{}", err);
+                process::exit(1);
+            }
+        }
+    }
 
     // Connect to Discord
     let bot = match discord::Discord::from_bot_token(&bot_token[..]) {
         Ok(bot) => bot,
         Err(err) => {
             error!("{}", err);
-            process::exit(1)
+            process::exit(1);
         }
     };
 
@@ -117,29 +181,36 @@ fn main() {
         Ok((connection, _)) => connection,
         Err(err) => {
             error!("{}", err);
-            process::exit(1)
+            process::exit(1);
         }
     };
+
+    debug!("Connected to Discord");
 
     loop {
         match connection.recv_event() {
             Ok(discord::model::Event::MessageCreate(message)) => {
+                // If the message was set by a person-user, scrape the message for emojis
+
                 println!("{} says: {}", message.author.name, message.content);
                 if message.content == "!test" {
                     let _ = bot.send_message(message.channel_id, "This is a reply to the test.", "", false);
                 } else if message.content == "!quit" {
                     connection.shutdown().unwrap();
                     info!("Quitting");
-                    println!("Quitting.");
-                    break
+                    break;
                 }
             }
             Ok(_) => {}
             Err(discord::Error::Closed(code, body)) => {
                 println!("Gateway closed with code {:?}: {}", code, body);
-                break
+                break;
             }
-            Err(err) => println!("Receive error: {:?}", err)
+            Err(err) => {
+                warn!("Receive error: {:?}", err);
+            }
         }
     }
+
+    db_conn.finish().unwrap();
 }
