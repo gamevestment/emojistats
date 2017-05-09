@@ -4,3 +4,14 @@ version = "0.1.0"
 authors = ["Jonathan Kim <jkim8192@gmail.com>"]
 
 [dependencies]
+config = "0.4"
+log = "0.3"
+
+[dependencies.log4rs]
+version = "0.7"
+default-features = false
+features = ["file_appender", "pattern_encoder"]
+
+[dependencies.discord]
+version = "0.8"
+default-features = false
