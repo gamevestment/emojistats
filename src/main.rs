@@ -7,10 +7,18 @@ extern crate discord;
 
 use log4rs::encode::pattern::PatternEncoder;
 use std::process;
-use std::collections::HashMap;
+use std::collections::{ HashMap, HashSet };
 use discord::model::{
     Event,
-    ChannelType
+    ChannelType,
+    MessageType,
+    ServerId,
+    PublicChannel,
+    ChannelId,
+    Message,
+    MessageId,
+    Emoji,
+    EmojiId
 };
 use discord::model::PossibleServer::Online;
 
@@ -19,7 +27,58 @@ const PROGRAM_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const LOG_FILE: &str = "emojistats.log";
 const CONFIG_FILE: &str = "config.toml";
 
-// TODO: fn to count Emoji
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct FlattenedEmoji {
+    server_id: ServerId,
+    id: Option<EmojiId>,
+    text: String
+}
+
+// TODO: Eq on FlattenedEmoji.id.0
+
+#[derive(Debug)]
+struct EmojiTracker {
+    db_conn: postgres::Connection,
+    channels: HashMap<ChannelId, ServerId>,
+    emojis: HashSet<FlattenedEmoji>
+}
+
+impl EmojiTracker {
+    fn new(db_conn: postgres::Connection) -> EmojiTracker {
+        EmojiTracker {
+            db_conn: db_conn,
+            channels: HashMap::new(),
+            emojis: HashSet::new()
+        }
+    }
+
+    fn add_channel(&mut self, channel: &PublicChannel) {
+        self.channels.insert(channel.id, channel.server_id);
+    }
+
+    fn add_emojis(&mut self, server_id: ServerId, emojis: &Vec<Emoji>) {
+        for emoji in emojis {
+            self.emojis.insert(FlattenedEmoji {
+                server_id: server_id,
+                id: Some(emoji.id),
+                text: format!("<:{}:{}>", emoji.name, emoji.id.0)
+            });
+        }
+    }
+
+    fn process_message(&self, message: &Message) {
+        println!("{}", &message.content);
+        for emoji in &self.emojis {
+            let count = message.content.matches(&emoji.text[..]).count();
+            println!("{} instances of {}", count, emoji.text);
+        }
+    }
+
+    fn finish(self) -> () {
+        println!("{:?}", &self);
+        self.db_conn.finish().unwrap();
+    }
+}
 
 fn main() {
     fn init_logging_config() {
@@ -137,8 +196,7 @@ fn main() {
 
     // Create tables
     {
-        let create_statements =
-            "
+        let create_statements = "\
             CREATE TABLE IF NOT EXISTS emoji (
                 id SERIAL,
                 discord_id NUMERIC NOT NULL,
@@ -193,7 +251,7 @@ fn main() {
 
     debug!("Connected to Discord");
 
-    let mut channels = HashMap::new();
+    let mut et = EmojiTracker::new(db_conn);
 
     loop {
         match connection.recv_event() {
@@ -202,22 +260,33 @@ fn main() {
                 for channel in &server.channels {
                     match &channel.kind {
                         &ChannelType::Text => {
-                            channels.insert(channel.id, server.id);
+                            et.add_channel(&channel);
                         }
                         _ => {}
                     }
                 }
+
+                et.add_emojis(server.id, &server.emojis);
+            }
+            Ok(Event::ServerEmojisUpdate(server_id, emojis)) => {
+                et.add_emojis(server_id, &emojis);
             }
             Ok(Event::MessageCreate(message)) => {
                 // If the message was set by a person-user, scrape the message for emojis
-
-                println!("{} says in {}: {}", message.author.name, message.channel_id, message.content);
-                if message.content == "!test" {
-                    let _ = bot.send_message(message.channel_id, "This is a reply to the test.", "", false);
-                } else if message.content == "!quit" {
-                    connection.shutdown().unwrap();
-                    info!("Quitting");
-                    break;
+                match &message.kind {
+                    &MessageType::Regular => {
+                        if !message.author.bot {
+                            match &message.content {
+                                _ if &message.content == "!quit" => {
+                                    break;
+                                }
+                                _ => {
+                                    et.process_message(&message);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             Ok(something) => {
@@ -233,5 +302,5 @@ fn main() {
         }
     }
 
-    db_conn.finish().unwrap();
+    et.finish();
 }
