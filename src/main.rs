@@ -42,7 +42,7 @@ impl Hash for FlattenedEmoji {
 
 impl PartialEq for FlattenedEmoji {
     fn eq(&self, other: &FlattenedEmoji) -> bool {
-        true
+        self.id.0 == other.id.0
     }
 }
 
