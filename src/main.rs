@@ -129,23 +129,17 @@ fn main() {
 
     {
         let host = match config.get_str("database.host") {
-            Some(val) => val,
-            None => {
-                error!("The configuration is missing a database host.");
-                process::exit(1);
-            }
+            Some(host) => host,
+            None => "localhost".to_string()
         };
 
-        let port = match config.get_str("database.port") {
-            Some(val) => val,
-            None => {
-                error!("The configuration is missing a database port.");
-                process::exit(1);
-            }
+        let port = match config.get_int("database.port") {
+            Some(port) => port,
+            None => 5432
         };
 
         let user = match config.get_str("database.user") {
-            Some(val) => val,
+            Some(user) => user,
             None => {
                 error!("The configuration is missing a database username.");
                 process::exit(1);
@@ -153,11 +147,8 @@ fn main() {
         };
 
         let password = match config.get_str("database.password") {
-            Some(val) => val,
-            None => {
-                error!("The configuration is missing a database password.");
-                process::exit(1);
-            }
+            Some(password) => format!(":{}", password),
+            None => "".to_string()
         };
 
         let database = match config.get_str("database.database") {
@@ -168,7 +159,7 @@ fn main() {
             }
         };
 
-        db_conn_str = format!("postgres://{user}:{password}@{host}:{port}/{database}",
+        db_conn_str = format!("postgres://{user}{password}@{host}:{port}/{database}",
             user = user,
             password = password,
             host = host,
