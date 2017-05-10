@@ -8,6 +8,7 @@ extern crate discord;
 use log4rs::encode::pattern::PatternEncoder;
 use std::process;
 use std::collections::{ HashMap, HashSet };
+use std::hash::{Hash, Hasher};
 use discord::model::{
     Event,
     ChannelType,
@@ -27,14 +28,25 @@ const PROGRAM_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const LOG_FILE: &str = "emojistats.log";
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(Debug)]
 struct FlattenedEmoji {
-    server_id: ServerId,
-    id: Option<EmojiId>,
+    id: EmojiId,
     text: String
 }
 
-// TODO: Eq on FlattenedEmoji.id.0
+impl Hash for FlattenedEmoji {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for FlattenedEmoji {
+    fn eq(&self, other: &FlattenedEmoji) -> bool {
+        true
+    }
+}
+
+impl Eq for FlattenedEmoji {}
 
 #[derive(Debug)]
 struct EmojiTracker {
@@ -56,11 +68,10 @@ impl EmojiTracker {
         self.channels.insert(channel.id, channel.server_id);
     }
 
-    fn add_emojis(&mut self, server_id: ServerId, emojis: &Vec<Emoji>) {
+    fn add_emojis(&mut self, emojis: &Vec<Emoji>) {
         for emoji in emojis {
-            self.emojis.insert(FlattenedEmoji {
-                server_id: server_id,
-                id: Some(emoji.id),
+            self.emojis.replace(FlattenedEmoji {
+                id: emoji.id,
                 text: format!("<:{}:{}>", emoji.name, emoji.id.0)
             });
         }
@@ -266,10 +277,10 @@ fn main() {
                     }
                 }
 
-                et.add_emojis(server.id, &server.emojis);
+                et.add_emojis(&server.emojis);
             }
-            Ok(Event::ServerEmojisUpdate(server_id, emojis)) => {
-                et.add_emojis(server_id, &emojis);
+            Ok(Event::ServerEmojisUpdate(_, emojis)) => {
+                et.add_emojis(&emojis);
             }
             Ok(Event::MessageCreate(message)) => {
                 // If the message was set by a person-user, scrape the message for emojis
