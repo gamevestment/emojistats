@@ -7,20 +7,10 @@ extern crate discord;
 
 use log4rs::encode::pattern::PatternEncoder;
 use std::process;
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use discord::model::{
-    Event,
-    ChannelType,
-    MessageType,
-    ServerId,
-    PublicChannel,
-    ChannelId,
-    Message,
-    MessageId,
-    Emoji,
-    EmojiId
-};
+use discord::model::{Event, ChannelType, MessageType, ServerId, PublicChannel, ChannelId, Message,
+                     MessageId, Emoji, EmojiId};
 use discord::model::PossibleServer::Online;
 
 const PROGRAM_NAME: &'static str = env!("CARGO_PKG_NAME");
@@ -31,7 +21,7 @@ const CONFIG_FILE: &str = "config.toml";
 #[derive(Debug)]
 struct FlattenedEmoji {
     id: EmojiId,
-    text: String
+    text: String,
 }
 
 impl Hash for FlattenedEmoji {
@@ -52,7 +42,7 @@ impl Eq for FlattenedEmoji {}
 struct EmojiTracker {
     db_conn: postgres::Connection,
     channels: HashMap<ChannelId, ServerId>,
-    emojis: HashSet<FlattenedEmoji>
+    emojis: HashSet<FlattenedEmoji>,
 }
 
 impl EmojiTracker {
@@ -60,7 +50,7 @@ impl EmojiTracker {
         EmojiTracker {
             db_conn: db_conn,
             channels: HashMap::new(),
-            emojis: HashSet::new()
+            emojis: HashSet::new(),
         }
     }
 
@@ -70,10 +60,11 @@ impl EmojiTracker {
 
     fn add_emojis(&mut self, emojis: &Vec<Emoji>) {
         for emoji in emojis {
-            self.emojis.replace(FlattenedEmoji {
-                id: emoji.id,
-                text: format!("<:{}:{}>", emoji.name, emoji.id.0)
-            });
+            self.emojis
+                .replace(FlattenedEmoji {
+                             id: emoji.id,
+                             text: format!("<:{}:{}>", emoji.name, emoji.id.0),
+                         });
         }
     }
 
@@ -100,17 +91,17 @@ impl EmojiTracker {
 fn main() {
     fn init_logging_config() {
         let log_file = log4rs::append::file::FileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}")))
+            .encoder(Box::new(PatternEncoder::new(
+                    "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}")))
             .build(LOG_FILE)
             .unwrap();
 
         // TODO: Suppress messages from external crates except for discord
         let log_config = log4rs::config::Config::builder()
-            .appender(log4rs::config::Appender::builder()
-                .build("all", Box::new(log_file)))
+            .appender(log4rs::config::Appender::builder().build("all", Box::new(log_file)))
             .build(log4rs::config::Root::builder()
-                .appender("all")
-                .build(log::LogLevelFilter::Info))
+                       .appender("all")
+                       .build(log::LogLevelFilter::Info))
             .unwrap();
 
         log4rs::init_config(log_config).unwrap();
@@ -137,12 +128,12 @@ fn main() {
     {
         let host = match config.get_str("database.host") {
             Some(host) => host,
-            None => "localhost".to_string()
+            None => "localhost".to_string(),
         };
 
         let port = match config.get_int("database.port") {
             Some(port) => port,
-            None => 5432
+            None => 5432,
         };
 
         let user = match config.get_str("database.user") {
@@ -155,7 +146,7 @@ fn main() {
 
         let password = match config.get_str("database.password") {
             Some(password) => format!(":{}", password),
-            None => "".to_string()
+            None => "".to_string(),
         };
 
         let database = match config.get_str("database.database") {
@@ -167,20 +158,18 @@ fn main() {
         };
 
         db_conn_str = format!("postgres://{user}{password}@{host}:{port}/{database}",
-            user = user,
-            password = password,
-            host = host,
-            port = port,
-            database = database
-        );
+                              user = user,
+                              password = password,
+                              host = host,
+                              port = port,
+                              database = database);
 
         debug!("Database connection string: postgres://{user}:{password}@{host}:{port}/{database}",
-            user = user,
-            password = "<PASSWORD_REDACTED>",
-            host = host,
-            port = port,
-            database = database
-        );
+               user = user,
+               password = "<PASSWORD_REDACTED>",
+               host = host,
+               port = port,
+               database = database);
 
         bot_token = match config.get_str("bot.bot_token") {
             Some(val) => val,
