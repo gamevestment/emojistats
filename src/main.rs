@@ -9,8 +9,8 @@ use log4rs::encode::pattern::PatternEncoder;
 use std::process;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use discord::model::{Event, ChannelType, MessageType, ServerId, PublicChannel, ChannelId, Message,
-                     MessageId, Emoji, EmojiId};
+use discord::model::{Event, ChannelType, MessageType, ServerId, PublicChannel, ChannelId, UserId,
+                     Message, Emoji, EmojiId};
 use discord::model::PossibleServer::Online;
 
 const PROGRAM_NAME: &'static str = env!("CARGO_PKG_NAME");
@@ -38,16 +38,22 @@ impl PartialEq for FlattenedEmoji {
 
 impl Eq for FlattenedEmoji {}
 
-#[derive(Debug)]
 struct EmojiTracker {
+    bot: discord::Discord,
+    bot_user_id: UserId,
     db_conn: postgres::Connection,
     channels: HashMap<ChannelId, ServerId>,
     emojis: HashSet<FlattenedEmoji>,
 }
 
 impl EmojiTracker {
-    fn new(db_conn: postgres::Connection) -> EmojiTracker {
+    fn new(bot: discord::Discord,
+           bot_user_id: UserId,
+           db_conn: postgres::Connection)
+           -> EmojiTracker {
         EmojiTracker {
+            bot: bot,
+            bot_user_id: bot_user_id,
             db_conn: db_conn,
             channels: HashMap::new(),
             emojis: HashSet::new(),
@@ -70,20 +76,55 @@ impl EmojiTracker {
 
     fn process_message(&self, message: &Message) {
         // TODO: If this is a private message, look for command or bot control token
-        // TODO: If the bot was mentioned, process as a command instead
-        println!("{}", &message.content);
+        println!("Received: \"{}\"", message.content);
+
+        // If the bot was mentioned, process as a command instead
+        if message.mentions.len() > 0 {
+            for user in &message.mentions {
+                if user.id.0 == self.bot_user_id.0 {
+                    self.process_command(message);
+                    return;
+                }
+            }
+        }
+
+        // Look for custom emojis
         for emoji in &self.emojis {
             let count = message.content.matches(&emoji.text[..]).count();
-            println!("{} instances of {}", count, emoji.text);
+            println!("{} instances of custom emoji {}", count, emoji.text);
 
-            // TODO: update the database with:
+            // TODO: Update the database with:
             // 1: the server, channel, user, message, and emoji count
             // 2: the emoji, server, channel, user, and use count (on duplicate, update +x)
+        }
+
+        // Look for standard emojis
+        // TODO: Look for standard emojis
+    }
+
+    fn process_command(&self, message: &Message) {
+        let expected_beginning = format!{"<@{}>", self.bot_user_id.0};
+        let expected_len = expected_beginning.len();
+
+        if message.content.len() > expected_beginning.len() &&
+                &message.content[0..expected_len] == expected_beginning {
+            let command: String = message
+                .content
+                .chars()
+                .skip(expected_len + 1)
+                .take(message.content.len() - expected_len)
+                .collect();
+
+            println!("Got command: {}", command);
+            let _ = self.bot
+                .send_message(message.channel_id,
+                              &format!("Received command: \"{}\"", command)[..],
+                              "",
+                              false);
         }
     }
 
     fn finish(self) -> () {
-        println!("{:?}", &self);
         self.db_conn.finish().unwrap();
     }
 }
@@ -96,7 +137,7 @@ fn main() {
             .build(LOG_FILE)
             .unwrap();
 
-        // TODO: Suppress messages from external crates except for discord
+        // TODO: Suppress log messages from external crates except for discord
         let log_config = log4rs::config::Config::builder()
             .appender(log4rs::config::Appender::builder().build("all", Box::new(log_file)))
             .build(log4rs::config::Root::builder()
@@ -239,8 +280,8 @@ fn main() {
         }
     };
 
-    let mut connection = match bot.connect() {
-        Ok((connection, _)) => connection,
+    let (mut connection, ready_event) = match bot.connect() {
+        Ok((connection, ready_event)) => (connection, ready_event),
         Err(err) => {
             error!("{}", err);
             process::exit(1);
@@ -249,7 +290,7 @@ fn main() {
 
     debug!("Connected to Discord");
 
-    let mut et = EmojiTracker::new(db_conn);
+    let mut et = EmojiTracker::new(bot, ready_event.user.id, db_conn);
 
     loop {
         match connection.recv_event() {
