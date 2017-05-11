@@ -12,3 +12,6 @@ auth_method = "bot_token"
 # Pick one
 # oauth2_token = ""
 # bot_token = ""
+
+# Use this password to control the bot through private messages
+password = "SuperSecret"
