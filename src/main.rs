@@ -9,8 +9,8 @@ use log4rs::encode::pattern::PatternEncoder;
 use std::process;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use discord::model::{Event, ChannelType, MessageType, ServerId, PublicChannel, ChannelId, UserId,
-                     Message, Emoji, EmojiId};
+use discord::model::{Event, Channel, ChannelType, MessageType, ServerId, PrivateChannel,
+                     PublicChannel, ChannelId, User, UserId, Message, Emoji, EmojiId};
 use discord::model::PossibleServer::Online;
 
 const PROGRAM_NAME: &'static str = env!("CARGO_PKG_NAME");
@@ -40,10 +40,11 @@ impl Eq for FlattenedEmoji {}
 
 struct EmojiTracker {
     bot: discord::Discord,
-    bot_user_id: UserId,
     db_conn: postgres::Connection,
-    channels: HashMap<ChannelId, ServerId>,
+    private_channels: HashSet<ChannelId>,
+    public_channels: HashMap<ChannelId, ServerId>,
     emojis: HashSet<FlattenedEmoji>,
+    command_prefix: String,
 }
 
 impl EmojiTracker {
@@ -53,15 +54,20 @@ impl EmojiTracker {
            -> EmojiTracker {
         EmojiTracker {
             bot: bot,
-            bot_user_id: bot_user_id,
             db_conn: db_conn,
-            channels: HashMap::new(),
+            private_channels: HashSet::new(),
+            public_channels: HashMap::new(),
             emojis: HashSet::new(),
+            command_prefix: format!("<@{}>", bot_user_id.0),
         }
     }
 
-    fn add_channel(&mut self, channel: &PublicChannel) {
-        self.channels.insert(channel.id, channel.server_id);
+    fn add_private_channel(&mut self, channel: &PrivateChannel) {
+        self.private_channels.insert(channel.id);
+    }
+
+    fn add_public_channel(&mut self, channel: &PublicChannel) {
+        self.public_channels.insert(channel.id, channel.server_id);
     }
 
     fn add_emojis(&mut self, emojis: &Vec<Emoji>) {
@@ -74,18 +80,38 @@ impl EmojiTracker {
         }
     }
 
-    fn process_message(&self, message: &Message) {
-        // TODO: If this is a private message, look for command or bot control token
+    fn process_message(&mut self, message: &Message) {
         println!("Received: \"{}\"", message.content);
 
-        // If the bot was mentioned, process as a command instead
-        if message.mentions.len() > 0 {
-            for user in &message.mentions {
-                if user.id.0 == self.bot_user_id.0 {
-                    self.process_command(message);
+        // This is a private channel; process the message as a command
+        if self.private_channels.contains(&message.channel_id) {
+            self.process_command(&message.author, &message.channel_id, &message.content);
+            return;
+        }
+        // Bot doesn't know about the channel
+        else if !self.public_channels.contains_key(&message.channel_id) {
+            match self.bot.get_channel(message.channel_id) {
+                Ok(Channel::Private(private_channel)) => {
+                    self.add_private_channel(&private_channel);
+                    self.process_command(&message.author, &message.channel_id, &message.content);
                     return;
                 }
+                Ok(Channel::Public(public_channel)) => {
+                    self.add_public_channel(&public_channel);
+                }
+                _ => {}
             }
+        }
+
+        // If the message begins with a mention of the bot, process as a command
+        if message.content.len() > self.command_prefix.len() &&
+           &message.content[0..self.command_prefix.len()] == self.command_prefix {
+            let command: String = message.content.chars()
+                          .skip(self.command_prefix.len() + 1)
+                          .take(message.content.len() - (self.command_prefix.len() + 1))
+                          .collect();
+            self.process_command(&message.author, &message.channel_id, &command);
+            return;
         }
 
         // Look for custom emojis
@@ -102,26 +128,8 @@ impl EmojiTracker {
         // TODO: Look for standard emojis
     }
 
-    fn process_command(&self, message: &Message) {
-        let expected_beginning = format!{"<@{}>", self.bot_user_id.0};
-        let expected_len = expected_beginning.len();
-
-        if message.content.len() > expected_beginning.len() &&
-                &message.content[0..expected_len] == expected_beginning {
-            let command: String = message
-                .content
-                .chars()
-                .skip(expected_len + 1)
-                .take(message.content.len() - expected_len)
-                .collect();
-
-            println!("Got command: {}", command);
-            let _ = self.bot
-                .send_message(message.channel_id,
-                              &format!("Received command: \"{}\"", command)[..],
-                              "",
-                              false);
-        }
+    fn process_command(&self, user: &User, channel_id: &ChannelId, command: &str) {
+        println!("Received command \"{}\" from \"{}\" in channel {}", command, user.name, channel_id.0)
     }
 
     fn finish(self) -> () {
@@ -292,14 +300,26 @@ fn main() {
 
     let mut et = EmojiTracker::new(bot, ready_event.user.id, db_conn);
 
+    for channel in ready_event.private_channels {
+        match channel {
+            Channel::Private(private_channel) => {
+                et.add_private_channel(&private_channel);
+            }
+            Channel::Public(public_channel) => {
+                et.add_public_channel(&public_channel);
+            }
+            _ => {}
+        }
+    }
+
     loop {
         match connection.recv_event() {
             Ok(Event::ServerCreate(Online(server))) => {
                 // Map text channel IDs to server IDs
-                for channel in &server.channels {
-                    match &channel.kind {
+                for public_channel in &server.channels {
+                    match &public_channel.kind {
                         &ChannelType::Text => {
-                            et.add_channel(&channel);
+                            et.add_public_channel(&public_channel);
                         }
                         _ => {}
                     }
@@ -320,6 +340,8 @@ fn main() {
                                     break;
                                 }
                                 _ => {
+                                    // TODO: Move this into process_command and figure out
+                                    // how to make the bot quit
                                     et.process_message(&message);
                                 }
                             }
