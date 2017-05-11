@@ -78,10 +78,16 @@ impl EmojiTracker {
     }
 
     fn process_message(&self, message: &Message) {
+        // TODO: If this is a private message, look for command or bot control token
+        // TODO: If the bot was mentioned, process as a command instead
         println!("{}", &message.content);
         for emoji in &self.emojis {
             let count = message.content.matches(&emoji.text[..]).count();
             println!("{} instances of {}", count, emoji.text);
+
+            // TODO: update the database with:
+            // 1: the server, channel, user, message, and emoji count
+            // 2: the emoji, server, channel, user, and use count (on duplicate, update +x)
         }
     }
 
@@ -98,12 +104,13 @@ fn main() {
             .build(LOG_FILE)
             .unwrap();
 
+        // TODO: Suppress messages from external crates except for discord
         let log_config = log4rs::config::Config::builder()
             .appender(log4rs::config::Appender::builder()
                 .build("all", Box::new(log_file)))
             .build(log4rs::config::Root::builder()
                 .appender("all")
-                .build(log::LogLevelFilter::Debug))
+                .build(log::LogLevelFilter::Info))
             .unwrap();
 
         log4rs::init_config(log_config).unwrap();
