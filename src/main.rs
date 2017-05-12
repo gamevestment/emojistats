@@ -10,30 +10,35 @@ use std::process;
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LOG_FILENAME: &str = "emojistats.log";
-const PG_CREATE_TABLE_STATEMENTS: &str = "\
-            CREATE TABLE IF NOT EXISTS emoji (
-                id SERIAL,
-                discord_id NUMERIC NOT NULL,
-                name VARCHAR(512),
-                PRIMARY KEY (id)
-            );
-            CREATE TABLE IF NOT EXISTS message (
-                id NUMERIC,
-                guild_id NUMERIC NOT NULL,
-                channel_id NUMERIC NOT NULL,
-                user_id NUMERIC NOT NULL,
-                emoji_count NUMERIC NOT NULL,
-                PRIMARY KEY (id)
-            );
-            CREATE TABLE IF NOT EXISTS emoji_usage (
-                emoji_id INTEGER NOT NULL,
-                guild_id NUMERIC NOT NULL,
-                channel_id NUMERIC NOT NULL,
-                user_id NUMERIC NOT NULL,
-                use_count NUMERIC NOT NULL,
-                PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
-                FOREIGN KEY (emoji_id) REFERENCES emoji (id)
-            );";
+const PG_CREATE_TABLE_STATEMENTS: &str = "
+CREATE TABLE IF NOT EXISTS emoji (
+    id SERIAL,
+    discord_id NUMERIC NOT NULL,
+    name VARCHAR(512),
+    PRIMARY KEY (id)
+);
+CREATE TABLE IF NOT EXISTS message (
+    id NUMERIC,
+    guild_id NUMERIC NOT NULL,
+    channel_id NUMERIC NOT NULL,
+    user_id NUMERIC NOT NULL,
+    emoji_count NUMERIC NOT NULL,
+    PRIMARY KEY (id)
+);
+CREATE TABLE IF NOT EXISTS emoji_usage (
+    emoji_id INTEGER NOT NULL,
+    guild_id NUMERIC NOT NULL,
+    channel_id NUMERIC NOT NULL,
+    user_id NUMERIC NOT NULL,
+    use_count NUMERIC NOT NULL,
+    PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
+    FOREIGN KEY (emoji_id) REFERENCES emoji (id)
+);";
+
+const EXIT_STATUS_BOT_TOKEN_MISSING: i32 = 1;
+const EXIT_STATUS_DB_CONFIG_INVALID: i32 = 2;
+const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
+const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
 
 fn get_env_string(key: &str) -> Option<String> {
     let value = dotenv::var(key)
@@ -124,11 +129,19 @@ fn main() {
 
     info!("Started {} v{}", PROGRAM_NAME, PROGRAM_VERSION);
 
+    let bot_token = match get_env_string("ES_BOT_TOKEN") {
+        Some(bot_token) => bot_token,
+        None => {
+            error!("No bot token found");
+            process::exit(EXIT_STATUS_BOT_TOKEN_MISSING);
+        }
+    };
+
     let (conn_string, conn_string_redacted) = match get_pg_connection_string() {
         Ok((conn_string, conn_string_redacted)) => (conn_string, conn_string_redacted),
         Err(reason) => {
             error!("Failed to build PostgreSQL connection string: {}", reason);
-            process::exit(1);
+            process::exit(EXIT_STATUS_DB_CONFIG_INVALID);
         }
     };
 
@@ -138,14 +151,14 @@ fn main() {
         Ok(conn) => conn,
         Err(reason) => {
             error!("Failed to connect to PostgreSQL: {}", reason);
-            process::exit(1);
+            process::exit(EXIT_STATUS_DB_COULDNT_CONNECT);
         }
     };
 
     if let Err(reason) = db_conn.batch_execute(PG_CREATE_TABLE_STATEMENTS) {
         error!("Failed to create tables: {}", reason);
         let _ = db_conn.finish();
-        process::exit(1);
+        process::exit(EXIT_STATUS_DB_COULDNT_CREATE_TABLES);
     }
 
     let _ = db_conn.finish();
