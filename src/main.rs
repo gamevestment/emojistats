@@ -7,9 +7,33 @@ extern crate serenity;
 
 use std::process;
 
-const PROGRAM_NAME: &'static str = env!("CARGO_PKG_NAME");
-const PROGRAM_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
+const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LOG_FILENAME: &str = "emojistats.log";
+const PG_CREATE_TABLE_STATEMENTS: &str = "\
+            CREATE TABLE IF NOT EXISTS emoji (
+                id SERIAL,
+                discord_id NUMERIC NOT NULL,
+                name VARCHAR(512),
+                PRIMARY KEY (id)
+            );
+            CREATE TABLE IF NOT EXISTS message (
+                id NUMERIC,
+                guild_id NUMERIC NOT NULL,
+                channel_id NUMERIC NOT NULL,
+                user_id NUMERIC NOT NULL,
+                emoji_count NUMERIC NOT NULL,
+                PRIMARY KEY (id)
+            );
+            CREATE TABLE IF NOT EXISTS emoji_usage (
+                emoji_id INTEGER NOT NULL,
+                guild_id NUMERIC NOT NULL,
+                channel_id NUMERIC NOT NULL,
+                user_id NUMERIC NOT NULL,
+                use_count NUMERIC NOT NULL,
+                PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
+                FOREIGN KEY (emoji_id) REFERENCES emoji (id)
+            );";
 
 fn get_env_string(key: &str) -> Option<String> {
     let value = dotenv::var(key)
@@ -109,4 +133,20 @@ fn main() {
     };
 
     info!("Connecting to \"{}\"", conn_string_redacted);
+
+    let db_conn = match postgres::Connection::connect(conn_string, postgres::TlsMode::None) {
+        Ok(conn) => conn,
+        Err(reason) => {
+            error!("Failed to connect to PostgreSQL: {}", reason);
+            process::exit(1);
+        }
+    };
+
+    if let Err(reason) = db_conn.batch_execute(PG_CREATE_TABLE_STATEMENTS) {
+        error!("Failed to create tables: {}", reason);
+        let _ = db_conn.finish();
+        process::exit(1);
+    }
+
+    let _ = db_conn.finish();
 }
