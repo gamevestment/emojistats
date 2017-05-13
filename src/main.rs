@@ -32,11 +32,19 @@ fn init_logging() {
 
     let appender = log4rs::config::Appender::builder().build("emojistats", Box::new(file));
 
+    let log_level_filter: log::LogLevelFilter;
+    if cfg!(debug_assertions) {
+        log_level_filter = log::LogLevelFilter::Debug;
+    } else {
+        log_level_filter = log::LogLevelFilter::Info;
+    }
+
     let config = log4rs::config::Config::builder()
         .appender(appender)
-        .build(log4rs::config::Root::builder()
-                   .appender("emojistats")
-                   .build(log::LogLevelFilter::Info))
+        .logger(log4rs::config::Logger::builder()
+                    .appender("emojistats")
+                    .build("emojistats", log_level_filter))
+        .build(log4rs::config::Root::builder().build(log_level_filter))
         .expect("Failed to build logging configuration");
 
     log4rs::init_config(config).expect("Failed to initialize logger");
