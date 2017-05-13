@@ -2,43 +2,15 @@ extern crate dotenv;
 #[macro_use]
 extern crate log;
 extern crate log4rs;
-extern crate postgres;
-extern crate serenity;
 
-use std::process;
+mod esbot;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LOG_FILENAME: &str = "emojistats.log";
-const PG_CREATE_TABLE_STATEMENTS: &str = "
-CREATE TABLE IF NOT EXISTS emoji (
-    id SERIAL,
-    discord_id NUMERIC NOT NULL,
-    name VARCHAR(512),
-    PRIMARY KEY (id)
-);
-CREATE TABLE IF NOT EXISTS message (
-    id NUMERIC,
-    guild_id NUMERIC NOT NULL,
-    channel_id NUMERIC NOT NULL,
-    user_id NUMERIC NOT NULL,
-    emoji_count NUMERIC NOT NULL,
-    PRIMARY KEY (id)
-);
-CREATE TABLE IF NOT EXISTS emoji_usage (
-    emoji_id INTEGER NOT NULL,
-    guild_id NUMERIC NOT NULL,
-    channel_id NUMERIC NOT NULL,
-    user_id NUMERIC NOT NULL,
-    use_count NUMERIC NOT NULL,
-    PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
-    FOREIGN KEY (emoji_id) REFERENCES emoji (id)
-);";
 
 const EXIT_STATUS_BOT_TOKEN_MISSING: i32 = 1;
 const EXIT_STATUS_DB_CONFIG_INVALID: i32 = 2;
-const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
-const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
 
 fn get_env_string(key: &str) -> Option<String> {
     let value = dotenv::var(key)
@@ -70,7 +42,7 @@ fn init_logging() {
     log4rs::init_config(config).expect("Failed to initialize logger");
 }
 
-fn get_pg_connection_string() -> Result<(String, String), String> {
+fn pg_get_conn_str() -> Result<(String, String), String> {
     let user = match get_env_string("ES_DB_USER") {
         Some(user) => user,
         None => {
@@ -103,13 +75,13 @@ fn get_pg_connection_string() -> Result<(String, String), String> {
         }
     };
 
-    let conn_string = format!("postgres://{}{}@{}{}/{}",
+    let pg_conn_str = format!("postgres://{}{}@{}{}/{}",
                               user,
                               password,
                               host,
                               port,
                               database);
-    let conn_string_redacted = format!("postgres://{}{}@{}{}/{}",
+    let pg_conn_str_redacted = format!("postgres://{}{}@{}{}/{}",
                                        user,
                                        if password.len() > 0 {
                                            ":<REDACTED>"
@@ -120,7 +92,7 @@ fn get_pg_connection_string() -> Result<(String, String), String> {
                                        port,
                                        database);
 
-    Ok((conn_string, conn_string_redacted))
+    Ok((pg_conn_str, pg_conn_str_redacted))
 }
 
 fn main() {
@@ -129,37 +101,26 @@ fn main() {
 
     info!("Started {} v{}", PROGRAM_NAME, PROGRAM_VERSION);
 
+    let (pg_conn_str, pg_conn_str_redacted) = match pg_get_conn_str() {
+        Ok((pg_conn_str, pg_conn_str_redacted)) => (pg_conn_str, pg_conn_str_redacted),
+        Err(reason) => {
+            error!("Failed to build PostgreSQL connection string: {}", reason);
+            std::process::exit(EXIT_STATUS_DB_CONFIG_INVALID);
+        }
+    };
+
     let bot_token = match get_env_string("ES_BOT_TOKEN") {
         Some(bot_token) => bot_token,
         None => {
             error!("No bot token found");
-            process::exit(EXIT_STATUS_BOT_TOKEN_MISSING);
+            std::process::exit(EXIT_STATUS_BOT_TOKEN_MISSING);
         }
     };
 
-    let (conn_string, conn_string_redacted) = match get_pg_connection_string() {
-        Ok((conn_string, conn_string_redacted)) => (conn_string, conn_string_redacted),
-        Err(reason) => {
-            error!("Failed to build PostgreSQL connection string: {}", reason);
-            process::exit(EXIT_STATUS_DB_CONFIG_INVALID);
-        }
-    };
+    info!("Connecting to \"{}\"", pg_conn_str_redacted);
 
-    info!("Connecting to \"{}\"", conn_string_redacted);
+    let mut eb = esbot::EsBot::new(pg_conn_str, bot_token);
+    let exit_status = eb.run();
 
-    let db_conn = match postgres::Connection::connect(conn_string, postgres::TlsMode::None) {
-        Ok(conn) => conn,
-        Err(reason) => {
-            error!("Failed to connect to PostgreSQL: {}", reason);
-            process::exit(EXIT_STATUS_DB_COULDNT_CONNECT);
-        }
-    };
-
-    if let Err(reason) = db_conn.batch_execute(PG_CREATE_TABLE_STATEMENTS) {
-        error!("Failed to create tables: {}", reason);
-        let _ = db_conn.finish();
-        process::exit(EXIT_STATUS_DB_COULDNT_CREATE_TABLES);
-    }
-
-    let _ = db_conn.finish();
+    std::process::exit(exit_status);
 }

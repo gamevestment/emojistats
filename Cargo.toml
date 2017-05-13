@@ -14,10 +14,9 @@ version = "0.7"
 default-features = false
 features = ["file_appender", "pattern_encoder"]
 
-[dependencies.serenity]
-version = "0.1.5"
+[dependencies.discord]
+version = "0.8"
 default-features = false
-features = ["cache", "framework"]
 
 [dependencies.postgres]
 version = "0.14"
