@@ -1,7 +1,10 @@
 extern crate discord;
 extern crate postgres;
 
-use self::discord::model::{Channel, ChannelId};
+use std::collections::HashMap;
+use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
+                           PrivateChannel, PublicChannel, Message, MessageType, UserId};
+use self::discord::model::PossibleServer::Online;
 
 const PG_CREATE_TABLE_STATEMENTS: &str = "
 CREATE TABLE IF NOT EXISTS emoji (
@@ -38,7 +41,13 @@ pub struct EsBot {
     bot_token: String,
 
     private_channels: Vec<ChannelId>,
-    public_channels: Vec<ChannelId>,
+    public_channels: HashMap<ChannelId, ServerId>,
+    control_users: Vec<UserId>,
+    command_prefix: String,
+    command_prefix_skip: usize,
+
+    discord: Option<discord::Discord>,
+    quit: bool,
 }
 
 impl EsBot {
@@ -50,7 +59,13 @@ impl EsBot {
             bot_token: bot_token.into(),
 
             private_channels: Vec::new(),
-            public_channels: Vec::new(),
+            public_channels: HashMap::new(),
+            control_users: Vec::new(),
+            command_prefix: "".to_string(),
+            command_prefix_skip: 0,
+
+            discord: None,
+            quit: false,
         }
     }
 
@@ -81,7 +96,7 @@ impl EsBot {
             }
         };
 
-        let (discord_conn, ready_event) = match discord.connect() {
+        let (mut discord_conn, ready_event) = match discord.connect() {
             Ok((discord_conn, ready_event)) => (discord_conn, ready_event),
             Err(reason) => {
                 error!("Failed to create websocket connection to Discord: {}",
@@ -90,9 +105,45 @@ impl EsBot {
             }
         };
 
-        // Add channels
+        // Add servers and channels
+        for server in &ready_event.servers {
+            match *server {
+                Online(ref server) => {
+                    self.add_server(server);
+                }
+                _ => {}
+            }
+        }
+
         for channel in &ready_event.private_channels {
             self.add_channel(channel);
+        }
+
+        // Let users invoke commands from public channels
+        self.command_prefix = format!("<@{}>", ready_event.user.id.0);
+        self.command_prefix_skip = self.command_prefix.len() + 1;
+
+        // Main loop
+        self.discord = Some(discord);
+
+        loop {
+            match discord_conn.recv_event() {
+                Ok(Event::ServerCreate(Online(server))) => {
+                    self.add_server(&server);
+                }
+                Ok(Event::MessageCreate(message)) => {
+                    // Process messages sent by people; ignore messages sent by bots
+                    if &message.kind == &MessageType::Regular && !message.author.bot {
+                        self.process_message(&message);
+                    }
+                }
+                _ => {}
+            }
+
+            if self.quit {
+                break;
+            }
+
         }
 
         let _ = db_conn.finish();
@@ -100,15 +151,81 @@ impl EsBot {
         0
     }
 
+    fn process_message(&mut self, message: &Message) {
+        if message.content.starts_with(&self.command_prefix) {
+            let (_, command_str) = message.content.split_at(self.command_prefix_skip);
+            self.process_command(message, command_str);
+            return;
+        }
+
+        // Treat all private messages as commands
+        if self.private_channels.contains(&message.channel_id) {
+            self.process_command(message, &message.content);
+            return;
+        }
+
+        debug!("Message from \"{}\": \"{}\"",
+               message.author.name,
+               message.content);
+    }
+
+    fn process_command(&mut self, message: &Message, command_str: &str) {
+        debug!("Command from \"{}\": \"{}\"",
+               message.author.name,
+               command_str);
+
+        let mut parts = command_str.split_whitespace();
+
+        let command = match parts.next() {
+            Some(command) => command,
+            None => {
+                return;
+            }
+        };
+
+        match command {
+            "quit" => {
+                self.quit = true;
+            }
+            _ => {
+                let _ = self.discord
+                    .as_ref()
+                    .unwrap()
+                    .send_message(message.channel_id,
+                                  &format!("Unknown command `{}`.", command),
+                                  "",
+                                  false);
+            }
+        }
+    }
+
+    fn add_server(&mut self, server: &LiveServer) {
+        for channel in &server.channels {
+            self.add_public_channel(channel);
+        }
+    }
+
     fn add_channel(&mut self, channel: &Channel) {
         match *channel {
             Channel::Private(ref channel) => {
-                self.private_channels.push(channel.id);
+                self.add_private_channel(channel);
             }
             Channel::Public(ref channel) => {
-                self.public_channels.push(channel.id);
+                self.add_public_channel(channel);
             }
             _ => {}
+        }
+    }
+
+    fn add_private_channel(&mut self, channel: &PrivateChannel) {
+        if channel.kind == ChannelType::Private {
+            self.private_channels.push(channel.id);
+        }
+    }
+
+    fn add_public_channel(&mut self, channel: &PublicChannel) {
+        if channel.kind == ChannelType::Text {
+            self.public_channels.insert(channel.id, channel.server_id);
         }
     }
 }
