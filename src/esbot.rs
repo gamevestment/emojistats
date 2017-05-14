@@ -63,7 +63,7 @@ ON CONFLICT (id) DO UPDATE
     SET public_channel_id = excluded.public_channel_id,
         user_id = excluded.user_id,
         emoji_count = excluded.emoji_count;";
-const PG_SELECT_STATS_CHANNEL_STATEMENT: &str = "
+const PG_SELECT_STATS_CHANNEL_TOP_EMOJI_STATEMENT: &str = "
 SELECT e.id, e.name, SUM(eu.use_count)
 FROM emoji_usage eu
     INNER JOIN emoji e ON eu.emoji_id = e.id
@@ -86,8 +86,17 @@ Authentication successful.";
 
 const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
 An error occurred while obtaining the statistics.";
+const MESSAGE_HELP: &str = "\
+**Commands:**
+`stats global`: See the top used emoji globally
+`stats server`: See the top used emoji on this server
+`stats channel [<#channel>]`: See the top used emoji on this channel \
+    (defaults to the current channel)
+`stats user [<@user>]`: See the specified user's most used emoji (defaults to yourself)";
+const MESSAGE_HELP_HINT: &str = "\
+To see a list of commands, use `help`.";
 const MESSAGE_HELP_STATS: &str = "\
-Usage: `stats [global | server | channel [<channel_name>] | user [<@user>]]`";
+Usage: `stats [global | server | channel [<#channel>] | user [<@user>]]`";
 
 #[allow(unused)]
 const MESSAGE_COMMAND_NOT_IMPLEMENTED: &str = "\
@@ -96,6 +105,11 @@ const MESSAGE_COMMAND_REQUIRES_AUTH: &str = "\
 Please authenticate first.";
 const MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL: &str = "\
 This command may only be used in public chat channels.";
+const MESSAGE_COMMAND_UNKNOWN: &str = "\
+Unknown command";
+
+const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
+**Top used emoji in this channel:**";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -113,7 +127,6 @@ pub struct EsBot {
     custom_emojis: HashMap<EmojiId, String>,
     control_users: Vec<UserId>,
     command_prefix: String,
-    command_prefix_skip: usize,
 
     discord: Option<discord::Discord>,
     db_conn: Option<postgres::Connection>,
@@ -135,7 +148,6 @@ impl EsBot {
             custom_emojis: HashMap::new(),
             control_users: Vec::new(),
             command_prefix: "".to_string(),
-            command_prefix_skip: 0,
 
             discord: None,
             db_conn: None,
@@ -195,7 +207,6 @@ impl EsBot {
 
         // Let users invoke commands from public channels
         self.command_prefix = format!("<@{}>", ready_event.user.id.0);
-        self.command_prefix_skip = self.command_prefix.len() + 1;
 
         // Main loop
         self.discord = Some(discord);
@@ -238,7 +249,11 @@ impl EsBot {
         // TODO: Ensure that the message channel ID is known
 
         if message.content.starts_with(&self.command_prefix) {
-            let (_, command_str) = message.content.split_at(self.command_prefix_skip);
+            let mut command_str = "";
+            if message.content.len() > (self.command_prefix.len()) {
+                let (_, command_str_) = message.content.split_at(self.command_prefix.len() + 1);
+                command_str = command_str_;
+            }
             self.process_command(message, command_str);
             return;
         }
@@ -263,14 +278,13 @@ impl EsBot {
 
         let mut parts = command_str.split_whitespace();
 
-        let command = match parts.next() {
-            Some(command) => command,
-            None => {
-                return;
+        match parts.next().unwrap_or("") {
+            "" => {
+                self.send_message(&message.channel_id, MESSAGE_HELP_HINT);
             }
-        };
-
-        match command {
+            "help" => {
+                self.send_message(&message.channel_id, MESSAGE_HELP);
+            }
             "auth" | "authenticate" => {
                 if !self.private_channels.contains(&message.channel_id) {
                     self.send_message(&message.channel_id, MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE);
@@ -350,7 +364,10 @@ impl EsBot {
 
                         match self.command_stats_channel(&message.channel_id) {
                             Ok(stats) => {
-                                self.send_message(&message.channel_id, stats);
+                                self.send_message(&message.channel_id,
+                                                  format!("{}\n{}",
+                                                          MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
+                                                          stats));
                             }
                             Err(_) => {
                                 self.send_message(&message.channel_id,
@@ -386,9 +403,12 @@ impl EsBot {
                       &message.author.name);
                 self.quit = true;
             }
-            _ => {
+            unknown_command => {
                 self.send_message(&message.channel_id,
-                                  format!("Unknown command `{}`.", command));
+                                  format!("{} `{}`. {}",
+                                          MESSAGE_COMMAND_UNKNOWN,
+                                          unknown_command,
+                                          MESSAGE_HELP_HINT));
             }
         }
     }
@@ -453,9 +473,11 @@ impl EsBot {
 
     fn command_stats_channel(&self, channel_id: &ChannelId) -> Result<String, ()> {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let select_stats_channel_statement =
-            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_STATEMENT) {
-                Ok(select_stats_channel_statement) => select_stats_channel_statement,
+        let select_stats_channel_top_emoji_statement =
+            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_EMOJI_STATEMENT) {
+                Ok(select_stats_channel_top_emoji_statement) => {
+                    select_stats_channel_top_emoji_statement
+                }
                 Err(reason) => {
                     error!("Error creating prepared statement: {}", reason);
                     return Err(());
@@ -466,7 +488,7 @@ impl EsBot {
 
         let channel_id = &(channel_id.0 as i64);
 
-        match select_stats_channel_statement.query(&[channel_id]) {
+        match select_stats_channel_top_emoji_statement.query(&[channel_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
                     stats = "No emoji have been used in this channel.".to_string();
@@ -476,10 +498,11 @@ impl EsBot {
                         let emoji_name = row.get::<usize, String>(1);
                         let use_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("\n<:{}:{}> was used {} times",
+                        stats += &format!("<:{}:{}> was used {} time{}\n",
                                 emoji_name,
                                 emoji_id,
-                                use_count);
+                                use_count,
+                                if use_count == 1 { "" } else { "s" });
                     }
                 }
             }
