@@ -73,7 +73,14 @@ ORDER BY SUM(eu.use_count) DESC
 LIMIT 5
 OFFSET 0;";
 const PG_SELECT_STATS_CHANNEL_TOP_USERS_STATEMENT: &str = "
-SELECT eu.user_id, SUM(eu.use_count)
+SELECT
+    eu.user_id,
+    SUM(eu.use_count),
+    (SELECT COUNT(*)
+    FROM message m
+    WHERE
+        m.user_id = eu.user_id
+        AND m.public_channel_id = $1)
 FROM emoji_usage eu
 WHERE eu.public_channel_id = $1
 GROUP BY eu.user_id
@@ -536,8 +543,12 @@ impl EsBot {
                     for row in &rows {
                         let user_id = row.get::<usize, i64>(0) as u64;
                         let use_count = row.get::<usize, i64>(1);
+                        let message_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("<@{}> has used {} emoji\n", user_id, use_count);
+                        stats += &format!("<@{}> has used {} emoji in {} messages\n",
+                                user_id,
+                                use_count,
+                                message_count);
                     }
                 }
             }
