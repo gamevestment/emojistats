@@ -7,16 +7,23 @@ A Discord bot that provides statistics on emoji usage.
 To use a command, mention the bot at the beginning of the message; for example:
 
 ```
-@EmojiStats leaderboard global
+@EmojiStats stats global
 ```
 
-Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot. You may not use `leaderboard server` or `leaderboard channel` through direct messages.
+Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot. You may not use `stats server` or `stats channel` through direct messages.
+
+When obtaining server, channel, or user stats in a public text channel, the stats returned will include custom emoji on that server.
+
+When obtaining global stats or when obtaining stats for yourself in a direct message, the stats returned will be for Unicode emoji only.
 
 ### General
 
-|                           Command                          |Description|
-|------------------------------------------------------------|-----------|
-|`leaderboard [global \| server \| channel \| user [<@user>]]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel. When requesting statistics for a user, you must @mention that user. If you do not specify a user, `<user>` will default to yourself.|
+|           Command           |                                   Description                                   |
+|-----------------------------|---------------------------------------------------------------------------------|
+|`stats global`               |See the top used Unicode emoji globally                                          |
+|`stats server`               |See the top used emoji on this server                                            |
+|`stats channel [<#channel>]]`|See the top used emoji on the specified channel (defaults to the current channel)|
+|`stats user [<@user>]`       |See the specified user's favourite emoji (defaults to yourself)                  |
 
 ### Bot control
 
