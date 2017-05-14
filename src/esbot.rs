@@ -50,6 +50,7 @@ pub struct EsBot {
     command_prefix_skip: usize,
 
     discord: Option<discord::Discord>,
+    db_conn: Option<postgres::Connection>,
     quit: bool,
 }
 
@@ -70,6 +71,7 @@ impl EsBot {
             command_prefix_skip: 0,
 
             discord: None,
+            db_conn: None,
             quit: false,
         }
     }
@@ -130,6 +132,7 @@ impl EsBot {
 
         // Main loop
         self.discord = Some(discord);
+        self.db_conn = Some(db_conn);
 
         loop {
             match discord_conn.recv_event() {
@@ -159,7 +162,7 @@ impl EsBot {
             }
         }
 
-        let _ = db_conn.finish();
+        let _ = self.db_conn.take().unwrap().finish();
         let _ = discord_conn.shutdown();
         0
     }
@@ -182,6 +185,8 @@ impl EsBot {
         debug!("Message from \"{}\": \"{}\"",
                message.author.name,
                message.content);
+
+        self.process_message_emojis(message);
     }
 
     fn process_command(&mut self, message: &Message, command_str: &str) {
@@ -252,6 +257,16 @@ impl EsBot {
             _ => {
                 self.send_message(&message.channel_id,
                                   format!("Unknown command `{}`.", command));
+            }
+        }
+    }
+
+    fn process_message_emojis(&self, message: &Message) {
+        for (custom_emoji_id, custom_emoji_name) in &self.custom_emojis {
+            let count = message.content.matches(custom_emoji_name).count();
+
+            if count > 0 {
+                debug!("{} instances of \"{}\"", count, custom_emoji_name);
             }
         }
     }
