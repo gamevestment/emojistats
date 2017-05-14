@@ -4,7 +4,7 @@ extern crate postgres;
 use std::collections::HashMap;
 use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
                            PrivateChannel, PublicChannel, Message, MessageType, Emoji, EmojiId,
-                           UserId};
+                           User, UserId};
 use self::discord::model::PossibleServer::Online;
 
 const PG_CREATE_TABLE_STATEMENTS: &str = "
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS emoji_usage (
     FOREIGN KEY (public_channel_id) REFERENCES public_channel (id),
     FOREIGN KEY (emoji_id) REFERENCES emoji (id)
 );";
+#[allow(unused)]
 const PG_INSERT_EMOJI_STATEMENT: &str = "
 INSERT INTO emoji (name)
 VALUES ($1);";
@@ -62,6 +63,15 @@ ON CONFLICT (id) DO UPDATE
     SET public_channel_id = excluded.public_channel_id,
         user_id = excluded.user_id,
         emoji_count = excluded.emoji_count;";
+const PG_SELECT_STATS_CHANNEL_STATEMENT: &str = "
+SELECT e.id, e.name, SUM(eu.use_count)
+FROM emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+WHERE eu.public_channel_id = $1
+GROUP BY e.id
+ORDER BY SUM(eu.use_count) DESC
+LIMIT 5
+OFFSET 0;";
 
 const MESSAGE_AUTH_ALREADY_AUTHENTICATED: &str = "\
 You have already authenticated.";
@@ -74,13 +84,18 @@ Please send me a direct message to authenticate.";
 const MESSAGE_AUTH_SUCCESS: &str = "\
 Authentication successful.";
 
+const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
+An error occurred while obtaining the statistics.";
 const MESSAGE_HELP_STATS: &str = "\
-Usage: `stats [global | server | channel | user [<@user>]]`";
+Usage: `stats [global | server | channel [<channel_name>] | user [<@user>]]`";
 
+#[allow(unused)]
 const MESSAGE_COMMAND_NOT_IMPLEMENTED: &str = "\
 This command has not yet been implemented.";
 const MESSAGE_COMMAND_REQUIRES_AUTH: &str = "\
 Please authenticate first.";
+const MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL: &str = "\
+This command may only be used in public chat channels.";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -296,16 +311,64 @@ impl EsBot {
 
                 match parts.next().unwrap_or("channel").to_lowercase().as_str() {
                     "global" => {
-                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                        match self.command_stats_global() {
+                            Ok(stats) => {
+                                self.send_message(&message.channel_id, stats);
+                            }
+                            Err(_) => {
+                                self.send_message(&message.channel_id,
+                                                  MESSAGE_ERROR_OBTAINING_STATS);
+                            }
+                        }
                     }
                     "server" | "guild" => {
-                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                        if !self.public_channels.contains_key(&message.channel_id) {
+                            self.send_message(&message.channel_id,
+                                              MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+                            return;
+                        }
+
+                        if let Some(server_id) = self.public_channels.get(&message.channel_id) {
+                            match self.command_stats_server(server_id) {
+                                Ok(stats) => {
+                                    self.send_message(&message.channel_id, stats);
+                                }
+                                Err(_) => {
+                                    self.send_message(&message.channel_id,
+                                                      MESSAGE_ERROR_OBTAINING_STATS);
+                                }
+                            }
+                        }
                     }
                     "channel" => {
-                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                        // TODO: Obtain channel ID from command argument
+                        if !self.public_channels.contains_key(&message.channel_id) {
+                            self.send_message(&message.channel_id,
+                                              MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+                            return;
+                        }
+
+                        match self.command_stats_channel(&message.channel_id) {
+                            Ok(stats) => {
+                                self.send_message(&message.channel_id, stats);
+                            }
+                            Err(_) => {
+                                self.send_message(&message.channel_id,
+                                                  MESSAGE_ERROR_OBTAINING_STATS);
+                            }
+                        }
                     }
                     "user" => {
-                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                        // TODO: Obtain user ID from command argument
+                        match self.command_stats_user(&message.author) {
+                            Ok(stats) => {
+                                self.send_message(&message.channel_id, stats);
+                            }
+                            Err(_) => {
+                                self.send_message(&message.channel_id,
+                                                  MESSAGE_ERROR_OBTAINING_STATS);
+                            }
+                        }
                     }
                     _ => {
                         self.send_message(&message.channel_id, MESSAGE_HELP_STATS);
@@ -378,6 +441,59 @@ impl EsBot {
                 .execute(&[&message_id, &channel_id, &user_id, &total_emoji_count]) {
             error!("Error inserting message: {}", reason);
         }
+    }
+
+    fn command_stats_global(&self) -> Result<String, ()> {
+        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
+    }
+
+    fn command_stats_server(&self, server_id: &ServerId) -> Result<String, ()> {
+        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
+    }
+
+    fn command_stats_channel(&self, channel_id: &ChannelId) -> Result<String, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_channel_statement =
+            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_STATEMENT) {
+                Ok(select_stats_channel_statement) => select_stats_channel_statement,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let mut stats: String = "".to_string();
+
+        let channel_id = &(channel_id.0 as i64);
+
+        match select_stats_channel_statement.query(&[channel_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    stats = "No emoji have been used in this channel.".to_string();
+                } else {
+                    for row in &rows {
+                        let emoji_id = row.get::<usize, i64>(0) as u64;
+                        let emoji_name = row.get::<usize, String>(1);
+                        let use_count = row.get::<usize, i64>(2);
+
+                        stats += &format!("\n<:{}:{}> was used {} times",
+                                emoji_name,
+                                emoji_id,
+                                use_count);
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting channel stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
+    }
+
+    fn command_stats_user(&self, user: &User) -> Result<String, ()> {
+        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
     }
 
     fn add_server(&mut self, server: &LiveServer) {
