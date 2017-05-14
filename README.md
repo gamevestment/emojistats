@@ -4,11 +4,19 @@ A Discord bot that provides statistics on emoji usage.
 
 ## Commands
 
+To use a command, mention the bot at the beginning of the message; for example:
+
+```
+@EmojiStats leaderboard global
+```
+
+Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot. You may not use `leaderboard server` or `leaderboard channel` through direct messages.
+
 ### General
 
-|                       Command                       |Description|
-|-----------------------------------------------------|-----------|
-|`leaderboard [global \| server \| channel \| <user>]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel.|
+|                           Command                          |Description|
+|------------------------------------------------------------|-----------|
+|`leaderboard [global \| server \| channel \| user [<user>]]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel. When requesting statistics for a user, you must @mention that user. If you do not specify a user, `<user>` will default to yourself.|
 
 ### Bot control
 
