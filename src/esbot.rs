@@ -3,7 +3,8 @@ extern crate postgres;
 
 use std::collections::HashMap;
 use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
-                           PrivateChannel, PublicChannel, Message, MessageType, UserId};
+                           PrivateChannel, PublicChannel, Message, MessageType, Emoji, EmojiId,
+                           UserId};
 use self::discord::model::PossibleServer::Online;
 
 const PG_CREATE_TABLE_STATEMENTS: &str = "
@@ -42,6 +43,7 @@ pub struct EsBot {
 
     private_channels: Vec<ChannelId>,
     public_channels: HashMap<ChannelId, ServerId>,
+    custom_emojis: HashMap<EmojiId, String>,
     control_users: Vec<UserId>,
     command_prefix: String,
     command_prefix_skip: usize,
@@ -60,6 +62,7 @@ impl EsBot {
 
             private_channels: Vec::new(),
             public_channels: HashMap::new(),
+            custom_emojis: HashMap::new(),
             control_users: Vec::new(),
             command_prefix: "".to_string(),
             command_prefix_skip: 0,
@@ -200,9 +203,13 @@ impl EsBot {
     }
 
     fn add_server(&mut self, server: &LiveServer) {
+        debug!("Adding from server: \"{}\"", server.name);
+
         for channel in &server.channels {
             self.add_public_channel(channel);
         }
+
+        self.add_custom_emojis(&server.emojis);
     }
 
     fn add_channel(&mut self, channel: &Channel) {
@@ -219,13 +226,28 @@ impl EsBot {
 
     fn add_private_channel(&mut self, channel: &PrivateChannel) {
         if channel.kind == ChannelType::Private {
+            debug!("Added private channel: \"{}\"", channel.recipient.name);
+
             self.private_channels.push(channel.id);
         }
     }
 
     fn add_public_channel(&mut self, channel: &PublicChannel) {
         if channel.kind == ChannelType::Text {
+            debug!("Added public channel: \"#{}\"", channel.name);
+
             self.public_channels.insert(channel.id, channel.server_id);
+        }
+    }
+
+    fn add_custom_emojis(&mut self, custom_emojis: &Vec<Emoji>) {
+        for custom_emoji in custom_emojis {
+            let custom_emoji_name = format!("<:{}:{}>", custom_emoji.name, custom_emoji.id.0);
+
+            debug!("Added custom emoji: \"{}\"", custom_emoji_name);
+
+            self.custom_emojis
+                .insert(custom_emoji.id, custom_emoji_name);
         }
     }
 }
