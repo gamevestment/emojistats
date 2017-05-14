@@ -40,6 +40,7 @@ const EXIT_STATUS_DISCORD_COULDNT_CONNECT: i32 = 11;
 pub struct EsBot {
     db_conn_str: String,
     bot_token: String,
+    bot_control_password: String,
 
     private_channels: Vec<ChannelId>,
     public_channels: HashMap<ChannelId, ServerId>,
@@ -53,12 +54,13 @@ pub struct EsBot {
 }
 
 impl EsBot {
-    pub fn new<S>(db_conn_str: S, bot_token: S) -> EsBot
+    pub fn new<S>(db_conn_str: S, bot_token: S, bot_control_password: S) -> EsBot
         where S: Into<String>
     {
         EsBot {
             db_conn_str: db_conn_str.into(),
             bot_token: bot_token.into(),
+            bot_control_password: bot_control_password.into(),
 
             private_channels: Vec::new(),
             public_channels: HashMap::new(),
@@ -155,7 +157,6 @@ impl EsBot {
             if self.quit {
                 break;
             }
-
         }
 
         let _ = db_conn.finish();
@@ -164,6 +165,8 @@ impl EsBot {
     }
 
     fn process_message(&mut self, message: &Message) {
+        // TODO: Ensure that the message channel ID is known
+
         if message.content.starts_with(&self.command_prefix) {
             let (_, command_str) = message.content.split_at(self.command_prefix_skip);
             self.process_command(message, command_str);
@@ -196,17 +199,52 @@ impl EsBot {
         };
 
         match command {
+            "auth" | "authenticate" => {
+                if !self.private_channels.contains(&message.channel_id) {
+                    self.send_message(&message.channel_id,
+                                      format!("Please send me a direct message to authenticate."));
+
+                    return;
+                }
+
+                if self.control_users.contains(&message.author.id) {
+                    self.send_message(&message.channel_id,
+                                      format!("You have already authenticated."));
+                    return;
+                }
+
+                match parts.next() {
+                    Some(try_password) => {
+                        if try_password == self.bot_control_password {
+                            debug!("Authentication successful for {}:\"{}\"",
+                                   message.author.id.0,
+                                   message.author.name);
+
+                            self.control_users.push(message.author.id);
+                            self.send_message(&message.channel_id,
+                                              format!("Authentication successful."));
+                        } else {
+                            info!("Failed authentication attempt by {}:\"{}\" with password \"{}\"",
+                                  message.author.id.0,
+                                  message.author.name,
+                                  try_password);
+
+                            self.send_message(&message.channel_id,
+                                              format!("Authentication unsuccessful."));
+                        }
+                    }
+                    None => {
+                        self.send_message(&message.channel_id, format!("Please enter a password."));
+                    }
+                };
+            }
             "quit" => {
+                debug!("Quitting");
                 self.quit = true;
             }
             _ => {
-                let _ = self.discord
-                    .as_ref()
-                    .unwrap()
-                    .send_message(message.channel_id,
-                                  &format!("Unknown command `{}`.", command),
-                                  "",
-                                  false);
+                self.send_message(&message.channel_id,
+                                  format!("Unknown command `{}`.", command));
             }
         }
     }
@@ -258,5 +296,14 @@ impl EsBot {
             self.custom_emojis
                 .insert(custom_emoji.id, custom_emoji_name);
         }
+    }
+
+    fn send_message<S>(&self, channel_id: &ChannelId, message: S)
+        where S: Into<String>
+    {
+        let _ = self.discord
+            .as_ref()
+            .unwrap()
+            .send_message(*channel_id, &message.into(), "", false);
     }
 }
