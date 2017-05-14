@@ -138,7 +138,7 @@ fn main() {
     let bot_control_password = get_env_string("ES_BOT_CONTROL_PASSWORD")
         .unwrap_or("".to_string());
 
-    info!("Connecting to \"{}\"", pg_conn_str_redacted);
+    debug!("Connecting to \"{}\"", pg_conn_str_redacted);
 
     let mut eb = esbot::EsBot::new(pg_conn_str, bot_token, bot_control_password);
     let exit_status = eb.run();
