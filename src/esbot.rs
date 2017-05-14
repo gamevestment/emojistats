@@ -9,28 +9,48 @@ use self::discord::model::PossibleServer::Online;
 
 const PG_CREATE_TABLE_STATEMENTS: &str = "
 CREATE TABLE IF NOT EXISTS emoji (
-    id SERIAL,
-    discord_id NUMERIC NOT NULL,
+    id BIGSERIAL NOT NULL,
     name VARCHAR(512),
     PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS message (
-    id NUMERIC,
-    guild_id NUMERIC NOT NULL,
-    channel_id NUMERIC NOT NULL,
-    user_id NUMERIC NOT NULL,
-    emoji_count NUMERIC NOT NULL,
+    id BIGINT,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    emoji_count INTEGER NOT NULL,
     PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS emoji_usage (
-    emoji_id INTEGER NOT NULL,
-    guild_id NUMERIC NOT NULL,
-    channel_id NUMERIC NOT NULL,
-    user_id NUMERIC NOT NULL,
-    use_count NUMERIC NOT NULL,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    emoji_id BIGINT NOT NULL,
+    use_count INTEGER NOT NULL,
     PRIMARY KEY (emoji_id, guild_id, channel_id, user_id),
     FOREIGN KEY (emoji_id) REFERENCES emoji (id)
 );";
+const PG_INSERT_EMOJI_STATEMENT: &str = "
+INSERT INTO emoji (name)
+VALUES ($1);";
+const PG_INSERT_CUSTOM_EMOJI_STATEMENT: &str = "
+INSERT INTO emoji (id, name)
+VALUES ($1, $2)
+ON CONFLICT (id) DO UPDATE
+    SET name = excluded.name;";
+const PG_INSERT_EMOJI_USAGE_STATEMENT: &str = "
+INSERT INTO emoji_usage (guild_id, channel_id, user_id, emoji_id, use_count)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (guild_id, channel_id, user_id, emoji_id) DO UPDATE
+    SET use_count = emoji_usage.use_count + excluded.use_count;";
+const PG_INSERT_MESSAGE_STATEMENT: &str = "
+INSERT INTO message (id, guild_id, channel_id, user_id, emoji_count)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (id) DO UPDATE
+    SET guild_id = excluded.guild_id,
+        channel_id = excluded.channel_id,
+        user_id = excluded.user_id,
+        emoji_count = excluded.emoji_count;";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -44,6 +64,7 @@ pub struct EsBot {
 
     private_channels: Vec<ChannelId>,
     public_channels: HashMap<ChannelId, ServerId>,
+    emojis: HashMap<char, u64>,
     custom_emojis: HashMap<EmojiId, String>,
     control_users: Vec<UserId>,
     command_prefix: String,
@@ -65,6 +86,7 @@ impl EsBot {
 
             private_channels: Vec::new(),
             public_channels: HashMap::new(),
+            emojis: HashMap::new(),
             custom_emojis: HashMap::new(),
             control_users: Vec::new(),
             command_prefix: "".to_string(),
@@ -262,11 +284,59 @@ impl EsBot {
     }
 
     fn process_message_emojis(&self, message: &Message) {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let insert_emoji_usage_statement = match db_conn.prepare(PG_INSERT_EMOJI_USAGE_STATEMENT) {
+            Ok(insert_emoji_usage_statement) => insert_emoji_usage_statement,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+        let insert_message_statement = match db_conn.prepare(PG_INSERT_MESSAGE_STATEMENT) {
+            Ok(insert_message_statement) => insert_message_statement,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+
+        let mut total_emoji_count = 0;
+
+        let message_id = message.id.0 as i64;
+        let guild_id = self.public_channels.get(&message.channel_id).unwrap().0 as i64;
+        let channel_id = message.channel_id.0 as i64;
+        let user_id = message.author.id.0 as i64;
+
         for (custom_emoji_id, custom_emoji_name) in &self.custom_emojis {
-            let count = message.content.matches(custom_emoji_name).count();
+            let count = message.content.matches(custom_emoji_name).count() as i32;
 
             if count > 0 {
                 debug!("{} instances of \"{}\"", count, custom_emoji_name);
+
+                let emoji_id = custom_emoji_id.0 as i64;
+
+                match insert_emoji_usage_statement
+                          .execute(&[&guild_id, &channel_id, &user_id, &emoji_id, &count]) {
+                    Ok(_) => {}
+                    Err(reason) => {
+                        error!("Eror inserting emoji usage: {}", reason);
+                    }
+                }
+            }
+
+            total_emoji_count += count;
+        }
+
+        debug!("Message {} had {} emojis", message_id, total_emoji_count);
+
+        match insert_message_statement.execute(&[&message_id,
+                                                 &guild_id,
+                                                 &channel_id,
+                                                 &user_id,
+                                                 &total_emoji_count]) {
+            Ok(_) => {}
+            Err(reason) => {
+                error!("Error inserting message: {}", reason);
             }
         }
     }
@@ -310,10 +380,28 @@ impl EsBot {
     }
 
     fn add_custom_emojis(&mut self, custom_emojis: &Vec<Emoji>) {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let insert_custom_emoji_statement = match db_conn
+                  .prepare(PG_INSERT_CUSTOM_EMOJI_STATEMENT) {
+            Ok(prepared_stmt) => prepared_stmt,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+
         for custom_emoji in custom_emojis {
             let custom_emoji_name = format!("<:{}:{}>", custom_emoji.name, custom_emoji.id.0);
 
-            debug!("Added custom emoji: \"{}\"", custom_emoji_name);
+            debug!("Adding custom emoji: \"{}\"", custom_emoji_name);
+
+            let emoji_id = custom_emoji.id.0 as i64;
+            match insert_custom_emoji_statement.execute(&[&emoji_id, &custom_emoji.name]) {
+                Ok(_) => {}
+                Err(reason) => {
+                    error!("Error inserting custom emoji: {}", reason);
+                }
+            }
 
             self.custom_emojis
                 .insert(custom_emoji.id, custom_emoji_name);
