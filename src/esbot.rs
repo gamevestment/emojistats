@@ -332,14 +332,15 @@ impl EsBot {
 
     fn process_message_emojis(&self, message: &Message) {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let insert_emoji_usage_statement = match db_conn.prepare(PG_INSERT_EMOJI_USAGE_STATEMENT) {
-            Ok(insert_emoji_usage_statement) => insert_emoji_usage_statement,
-            Err(reason) => {
-                error!("Error creating prepared statement: {}", reason);
-                return;
-            }
-        };
-        let insert_message_statement = match db_conn.prepare(PG_INSERT_MESSAGE_STATEMENT) {
+        let insert_emoji_usage_statement =
+            match db_conn.prepare_cached(PG_INSERT_EMOJI_USAGE_STATEMENT) {
+                Ok(insert_emoji_usage_statement) => insert_emoji_usage_statement,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return;
+                }
+            };
+        let insert_message_statement = match db_conn.prepare_cached(PG_INSERT_MESSAGE_STATEMENT) {
             Ok(insert_message_statement) => insert_message_statement,
             Err(reason) => {
                 error!("Error creating prepared statement: {}", reason);
@@ -415,7 +416,7 @@ impl EsBot {
 
             let db_conn = self.db_conn.as_ref().unwrap();
             let insert_public_channel_statement =
-                match db_conn.prepare(PG_INSERT_PUBLIC_CHANNEL_STATEMENT) {
+                match db_conn.prepare_cached(PG_INSERT_PUBLIC_CHANNEL_STATEMENT) {
                     Ok(prepared_stmt) => prepared_stmt,
                     Err(reason) => {
                         error!("Error creating prepared statement: {}", reason);
@@ -437,14 +438,14 @@ impl EsBot {
 
     fn add_custom_emojis(&mut self, custom_emojis: &Vec<Emoji>) {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let insert_custom_emoji_statement = match db_conn
-                  .prepare(PG_INSERT_CUSTOM_EMOJI_STATEMENT) {
-            Ok(prepared_stmt) => prepared_stmt,
-            Err(reason) => {
-                error!("Error creating prepared statement: {}", reason);
-                return;
-            }
-        };
+        let insert_custom_emoji_statement =
+            match db_conn.prepare_cached(PG_INSERT_CUSTOM_EMOJI_STATEMENT) {
+                Ok(prepared_stmt) => prepared_stmt,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return;
+                }
+            };
 
         for custom_emoji in custom_emojis {
             let custom_emoji_name = format!("<:{}:{}>", custom_emoji.name, custom_emoji.id.0);
