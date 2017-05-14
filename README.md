@@ -6,16 +6,16 @@ A Discord bot that provides statistics on emoji usage.
 
 ### General
 
-|              Command          |Description|
-|-------------------------------|-----------|
-|`leaderboard [global | server | channel | <user>]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel.|
+|                       Command                       |Description|
+|-----------------------------------------------------|-----------|
+|`leaderboard [global \| server \| channel \| <user>]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel.|
 
 ### Bot control
 
-|             Command            |                            Description                              |
-|--------------------------------|---------------------------------------------------------------------|
-|`auth | authenticate <password>`|Attempts to authenticate with the bot using the bot control password.|
-|`quit`                          |Shuts down the bot. You must be authenticated to use this command.   |
+|             Command             |                            Description                              |
+|---------------------------------|---------------------------------------------------------------------|
+|`auth \| authenticate <password>`|Attempts to authenticate with the bot using the bot control password.|
+|`quit`                           |Shuts down the bot. You must be authenticated to use this command.   |
 
 
 ## Requirements
