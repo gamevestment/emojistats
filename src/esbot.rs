@@ -361,9 +361,8 @@ impl EsBot {
 
                 let emoji_id = custom_emoji_id.0 as i64;
 
-                if let Err(reason) =
-                    insert_emoji_usage_statement
-                        .execute(&[&channel_id, &user_id, &emoji_id, &count]) {
+                if let Err(reason) = insert_emoji_usage_statement
+                       .execute(&[&channel_id, &user_id, &emoji_id, &count]) {
                     error!("Eror inserting emoji usage: {}", reason);
                 }
             }
@@ -374,10 +373,8 @@ impl EsBot {
         debug!("Message {} had {} emojis", message_id, total_emoji_count);
 
         if let Err(reason) =
-            insert_message_statement.execute(&[&message_id,
-                                               &channel_id,
-                                               &user_id,
-                                               &total_emoji_count]) {
+            insert_message_statement
+                .execute(&[&message_id, &channel_id, &user_id, &total_emoji_count]) {
             error!("Error inserting message: {}", reason);
         }
     }
