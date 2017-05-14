@@ -24,14 +24,6 @@ fn get_env_string(key: &str) -> Option<String> {
 fn init_logging() {
     let filename = get_env_string("ES_LOG_FILENAME").unwrap_or(DEFAULT_LOG_FILENAME.to_string());
 
-    let file = log4rs::append::file::FileAppender::builder()
-            .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
-                    "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}")))
-            .build(filename)
-            .expect("Failed to create log file");
-
-    let appender = log4rs::config::Appender::builder().build("emojistats", Box::new(file));
-
     let log_level_filter: log::LogLevelFilter;
     if cfg!(debug_assertions) {
         log_level_filter = log::LogLevelFilter::Debug;
@@ -39,11 +31,25 @@ fn init_logging() {
         log_level_filter = log::LogLevelFilter::Info;
     }
 
+    let file = log4rs::append::file::FileAppender::builder()
+            .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
+                    "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}")))
+            .build(filename)
+            .expect("Failed to create log file");
+    let file_appender = log4rs::config::Appender::builder().build("file", Box::new(file));
+
+    let stdout = log4rs::append::console::ConsoleAppender::builder().build();
+    let stdout_appender = log4rs::config::Appender::builder().build("stdout", Box::new(stdout));
+
+    let logger = log4rs::config::Logger::builder()
+        .appender("file")
+        .appender("stdout")
+        .build("emojistats", log_level_filter);
+
     let config = log4rs::config::Config::builder()
-        .appender(appender)
-        .logger(log4rs::config::Logger::builder()
-                    .appender("emojistats")
-                    .build("emojistats", log_level_filter))
+        .appender(file_appender)
+        .appender(stdout_appender)
+        .logger(logger)
         .build(log4rs::config::Root::builder().build(log_level_filter))
         .expect("Failed to build logging configuration");
 
