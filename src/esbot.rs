@@ -52,6 +52,25 @@ ON CONFLICT (id) DO UPDATE
         user_id = excluded.user_id,
         emoji_count = excluded.emoji_count;";
 
+const MESSAGE_AUTH_ALREADY_AUTHENTICATED: &str = "\
+You have already authenticated.";
+const MESSAGE_AUTH_FAILURE: &str = "\
+Authentication unsuccessful.";
+const MESSAGE_AUTH_MISSING_PASSWORD: &str = "\
+Please enter a password.";
+const MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE: &str = "\
+Please send me a direct message to authenticate.";
+const MESSAGE_AUTH_SUCCESS: &str = "\
+Authentication successful.";
+
+const MESSAGE_HELP_STATS: &str = "\
+Usage: `stats [global | server | channel | user [<@user>]]`";
+
+const MESSAGE_COMMAND_NOT_IMPLEMENTED: &str = "\
+This command has not yet been implemented.";
+const MESSAGE_COMMAND_REQUIRES_AUTH: &str = "\
+Please authenticate first.";
+
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
 const EXIT_STATUS_DISCORD_COULDNT_AUTHENTICATE: i32 = 10;
@@ -228,15 +247,13 @@ impl EsBot {
         match command {
             "auth" | "authenticate" => {
                 if !self.private_channels.contains(&message.channel_id) {
-                    self.send_message(&message.channel_id,
-                                      format!("Please send me a direct message to authenticate."));
+                    self.send_message(&message.channel_id, MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE);
 
                     return;
                 }
 
                 if self.control_users.contains(&message.author.id) {
-                    self.send_message(&message.channel_id,
-                                      format!("You have already authenticated."));
+                    self.send_message(&message.channel_id, MESSAGE_AUTH_ALREADY_AUTHENTICATED);
                     return;
                 }
 
@@ -248,26 +265,45 @@ impl EsBot {
                                    message.author.name);
 
                             self.control_users.push(message.author.id);
-                            self.send_message(&message.channel_id,
-                                              format!("Authentication successful."));
+                            self.send_message(&message.channel_id, MESSAGE_AUTH_SUCCESS);
                         } else {
                             info!("Failed authentication attempt by {}:\"{}\" with password \"{}\"",
                                   message.author.id.0,
                                   message.author.name,
                                   try_password);
 
-                            self.send_message(&message.channel_id,
-                                              format!("Authentication unsuccessful."));
+                            self.send_message(&message.channel_id, MESSAGE_AUTH_FAILURE);
                         }
                     }
                     None => {
-                        self.send_message(&message.channel_id, format!("Please enter a password."));
+                        self.send_message(&message.channel_id, MESSAGE_AUTH_MISSING_PASSWORD);
+                    }
+                };
+            }
+            "stats" => {
+                let user_id = message.author.id;
+
+                let stats_type = match parts.next().unwrap_or("channel").to_lowercase().as_str() {
+                    "global" => {
+                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                    }
+                    "server" | "guild" => {
+                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                    }
+                    "channel" => {
+                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                    }
+                    "user" => {
+                        self.send_message(&message.channel_id, MESSAGE_COMMAND_NOT_IMPLEMENTED);
+                    }
+                    _ => {
+                        self.send_message(&message.channel_id, MESSAGE_HELP_STATS);
                     }
                 };
             }
             "quit" => {
                 if !self.control_users.contains(&message.author.id) {
-                    self.send_message(&message.channel_id, "Please authenticate first.");
+                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
                     return;
                 }
 

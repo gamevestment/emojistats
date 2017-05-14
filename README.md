@@ -16,7 +16,7 @@ Alternatively, you may directly message the bot. When you send a direct message,
 
 |                           Command                          |Description|
 |------------------------------------------------------------|-----------|
-|`leaderboard [global \| server \| channel \| user [<user>]]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel. When requesting statistics for a user, you must @mention that user. If you do not specify a user, `<user>` will default to yourself.|
+|`leaderboard [global \| server \| channel \| user [<@user>]]`|Shows the top used emoji globally, on the current server, in the current channel, or for the specified user. Defaults to the current channel. When requesting statistics for a user, you must @mention that user. If you do not specify a user, `<user>` will default to yourself.|
 
 ### Bot control
 
