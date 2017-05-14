@@ -50,11 +50,17 @@ fn init_logging() {
         .appender("stdout")
         .build(PROGRAM_NAME, log_level_filter);
 
+    let mut root = log4rs::config::Root::builder();
+
+    if cfg!(debug_assertions) {
+        root = root.appender("file").appender("stdout");
+    }
+
     let config = log4rs::config::Config::builder()
         .appender(file_appender)
         .appender(stdout_appender)
         .logger(logger)
-        .build(log4rs::config::Root::builder().build(log_level_filter))
+        .build(root.build(log_level_filter))
         .expect("Failed to build logging configuration");
 
     log4rs::init_config(config).expect("Failed to initialize logger");
