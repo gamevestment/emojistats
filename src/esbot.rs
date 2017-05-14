@@ -64,6 +64,23 @@ ON CONFLICT (id) DO UPDATE
     SET public_channel_id = excluded.public_channel_id,
         user_id = excluded.user_id,
         emoji_count = excluded.emoji_count;";
+const PG_SELECT_STATS_GLOBAL: &str = "
+SELECT
+    e.name,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+WHERE
+    e.is_custom_emoji = FALSE
+GROUP BY
+    e.name
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0;";
 const PG_SELECT_STATS_CHANNEL_TOP_EMOJI: &str = "
 SELECT
     e.id,
@@ -82,7 +99,7 @@ LIMIT
     5
 OFFSET
     0;";
-const PG_select_stats_channel_top_users: &str = "
+const PG_SELECT_STATS_CHANNEL_TOP_USERS: &str = "
 SELECT
     eu.user_id,
     SUM(eu.use_count),
@@ -182,10 +199,14 @@ This command may only be used in public chat channels.";
 const MESSAGE_COMMAND_UNKNOWN: &str = "\
 Unknown command";
 
+const MESSAGE_STATS_GLOBAL: &str = "\
+Top used Unicode emoji globally:";
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
-**Top used emoji and emoji users in this channel:**";
+Top used emoji and emoji users in this channel:";
 const MESSAGE_STATS_USER: &str = "\
 's favourite emoji:";
+const MESSAGE_STATS_USER_UNICODE: &str = "\
+'s favourite Unicode emoji:";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -403,7 +424,10 @@ impl EsBot {
                     "global" => {
                         match self.command_stats_global() {
                             Ok(stats) => {
-                                self.send_message(&message.channel_id, stats);
+                                self.send_message(&message.channel_id,
+                                                  format!("**{}**\n{}",
+                                                          MESSAGE_STATS_GLOBAL,
+                                                          stats));
                             }
                             Err(_) => {
                                 self.send_message(&message.channel_id,
@@ -441,7 +465,7 @@ impl EsBot {
                         match self.command_stats_channel(&message.channel_id) {
                             Ok(stats) => {
                                 self.send_message(&message.channel_id,
-                                                  format!("{}\n{}",
+                                                  format!("**{}**\n{}",
                                                           MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
                                                           stats));
                             }
@@ -470,7 +494,11 @@ impl EsBot {
                                 self.send_message(&message.channel_id,
                                                   format!("**<@{}>{}**\n{}",
                                                           user_id.0,
-                                                          MESSAGE_STATS_USER,
+                                                          if is_public_channel {
+                                                              MESSAGE_STATS_USER
+                                                          } else {
+                                                              MESSAGE_STATS_USER_UNICODE
+                                                          },
                                                           stats));
                             }
                             Err(_) => {
@@ -555,7 +583,40 @@ impl EsBot {
     }
 
     fn command_stats_global(&self) -> Result<String, ()> {
-        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let stats_global = match db_conn.prepare_cached(PG_SELECT_STATS_GLOBAL) {
+            Ok(stats_global) => stats_global,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return Err(());
+            }
+        };
+
+        let mut stats: String = "".to_string();
+
+        match stats_global.query(&[]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    stats = "No Unicode emoji have been used.".to_string();
+                } else {
+                    for row in &rows {
+                        let emoji_name = row.get::<usize, String>(0);
+                        let use_count = row.get::<usize, i64>(1);
+
+                        stats += &format!("{} was used {} time{}\n",
+                                emoji_name,
+                                use_count,
+                                if use_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting global stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
     }
 
     fn command_stats_server(&self, server_id: &ServerId) -> Result<String, ()> {
@@ -573,7 +634,7 @@ impl EsBot {
                 }
             };
         let select_stats_channel_top_users =
-            match db_conn.prepare_cached(PG_select_stats_channel_top_users) {
+            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_USERS) {
                 Ok(select_stats_channel_top_users) => select_stats_channel_top_users,
                 Err(reason) => {
                     error!("Error creating prepared statement: {}", reason);
@@ -700,7 +761,7 @@ impl EsBot {
         match select_stats_user_favourite_unicode_emoji.query(&[user_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "This user has not used any emoji.".to_string();
+                    stats = "This user has not used any Unicode emoji.".to_string();
                 } else {
                     for row in &rows {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
