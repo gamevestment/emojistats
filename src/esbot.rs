@@ -239,7 +239,14 @@ impl EsBot {
                 };
             }
             "quit" => {
-                debug!("Quitting");
+                if !self.control_users.contains(&message.author.id) {
+                    self.send_message(&message.channel_id, "Please authenticate first.");
+                    return;
+                }
+
+                info!("Quitting per {}:\"{}\"",
+                      &message.author.id.0,
+                      &message.author.name);
                 self.quit = true;
             }
             _ => {
