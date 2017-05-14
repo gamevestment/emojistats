@@ -134,6 +134,15 @@ impl EsBot {
                 Ok(Event::ServerCreate(Online(server))) => {
                     self.add_server(&server);
                 }
+                Ok(Event::ChannelCreate(channel)) => {
+                    self.add_channel(&channel);
+                }
+                Ok(Event::ChannelUpdate(channel)) => {
+                    self.add_channel(&channel);
+                }
+                Ok(Event::ServerEmojisUpdate(_, custom_emojis)) => {
+                    self.add_custom_emojis(&custom_emojis);
+                }
                 Ok(Event::MessageCreate(message)) => {
                     // Process messages sent by people; ignore messages sent by bots
                     if &message.kind == &MessageType::Regular && !message.author.bot {
