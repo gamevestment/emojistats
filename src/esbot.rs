@@ -4,13 +4,14 @@ extern crate postgres;
 use std::collections::HashMap;
 use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
                            PrivateChannel, PublicChannel, Message, MessageType, Emoji, EmojiId,
-                           User, UserId};
+                           UserId};
 use self::discord::model::PossibleServer::Online;
 
-const PG_CREATE_TABLE_STATEMENTS: &str = "
+const PG_CREATE_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS emoji (
     id BIGSERIAL NOT NULL,
-    name VARCHAR(512),
+    name VARCHAR(512) NOT NULL,
+    is_custom_emoji BOOL NOT NULL,
     PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public_channel (
@@ -37,56 +38,114 @@ CREATE TABLE IF NOT EXISTS emoji_usage (
     FOREIGN KEY (emoji_id) REFERENCES emoji (id)
 );";
 #[allow(unused)]
-const PG_INSERT_EMOJI_STATEMENT: &str = "
-INSERT INTO emoji (name)
-VALUES ($1);";
-const PG_INSERT_CUSTOM_EMOJI_STATEMENT: &str = "
-INSERT INTO emoji (id, name)
-VALUES ($1, $2)
+const PG_INSERT_EMOJI: &str = "
+INSERT INTO emoji (name, is_custom_emoji)
+VALUES ($1, FALSE);";
+const PG_INSERT_CUSTOM_EMOJI: &str = "
+INSERT INTO emoji (id, name, is_custom_emoji)
+VALUES ($1, $2, TRUE)
 ON CONFLICT (id) DO UPDATE
     SET name = excluded.name;";
-const PG_INSERT_PUBLIC_CHANNEL_STATEMENT: &str = "
+const PG_INSERT_PUBLIC_CHANNEL: &str = "
 INSERT INTO public_channel (id, guild_id, name)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE
     SET guild_id = excluded.guild_id,
         name = excluded.name";
-const PG_INSERT_EMOJI_USAGE_STATEMENT: &str = "
+const PG_INSERT_EMOJI_USAGE: &str = "
 INSERT INTO emoji_usage (public_channel_id, user_id, emoji_id, use_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (public_channel_id, user_id, emoji_id) DO UPDATE
     SET use_count = emoji_usage.use_count + excluded.use_count;";
-const PG_INSERT_MESSAGE_STATEMENT: &str = "
+const PG_INSERT_MESSAGE: &str = "
 INSERT INTO message (id, public_channel_id, user_id, emoji_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
     SET public_channel_id = excluded.public_channel_id,
         user_id = excluded.user_id,
         emoji_count = excluded.emoji_count;";
-const PG_SELECT_STATS_CHANNEL_TOP_EMOJI_STATEMENT: &str = "
-SELECT e.id, e.name, SUM(eu.use_count)
-FROM emoji_usage eu
+const PG_SELECT_STATS_CHANNEL_TOP_EMOJI: &str = "
+SELECT
+    e.id,
+    e.name,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
     INNER JOIN emoji e ON eu.emoji_id = e.id
-WHERE eu.public_channel_id = $1
-GROUP BY e.id
-ORDER BY SUM(eu.use_count) DESC
-LIMIT 5
-OFFSET 0;";
-const PG_SELECT_STATS_CHANNEL_TOP_USERS_STATEMENT: &str = "
+WHERE
+    eu.public_channel_id = $1
+GROUP BY
+    e.id
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0;";
+const PG_select_stats_channel_top_users: &str = "
 SELECT
     eu.user_id,
     SUM(eu.use_count),
-    (SELECT COUNT(*)
-    FROM message m
+    (SELECT
+        COUNT(*)
+    FROM
+        message m
     WHERE
-        m.user_id = eu.user_id
-        AND m.public_channel_id = $1)
-FROM emoji_usage eu
-WHERE eu.public_channel_id = $1
-GROUP BY eu.user_id
-ORDER BY SUM(eu.use_count) DESC
-LIMIT 5
-OFFSET 0;";
+        m.user_id = eu.user_id AND
+        m.public_channel_id = $1)
+FROM
+    emoji_usage eu
+WHERE
+    eu.public_channel_id = $1
+GROUP BY
+    eu.user_id
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0;";
+const PG_SELECT_STATS_USER_FAVOURITE_EMOJI_FOR_SERVER: &str = "
+SELECT
+    e.id,
+    e.name,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+    INNER JOIN public_channel pc ON eu.public_channel_id = pc.id
+WHERE
+    eu.user_id = $1 AND
+    pc.guild_id = $2
+GROUP BY
+    e.id,
+    e.name
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0";
+const PG_SELECT_STATS_USER_FAVOURITE_UNICODE_EMOJI: &str = "
+SELECT
+    e.id,
+    e.name,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+WHERE
+    eu.user_id = $1 AND
+    e.is_custom_emoji = FALSE
+GROUP BY
+    e.id,
+    e.name
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0";
 
 const MESSAGE_AUTH_ALREADY_AUTHENTICATED: &str = "\
 You have already authenticated.";
@@ -125,6 +184,8 @@ Unknown command";
 
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
 **Top used emoji and emoji users in this channel:**";
+const MESSAGE_STATS_USER: &str = "\
+'s favourite emoji:";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -181,7 +242,7 @@ impl EsBot {
             }
         };
 
-        if let Err(reason) = db_conn.batch_execute(PG_CREATE_TABLE_STATEMENTS) {
+        if let Err(reason) = db_conn.batch_execute(PG_CREATE_TABLES) {
             error!("Failed to create tables: {}", reason);
             let _ = db_conn.finish();
             return EXIT_STATUS_DB_COULDNT_CREATE_TABLES;
@@ -292,6 +353,9 @@ impl EsBot {
                command_str);
 
         let mut parts = command_str.split_whitespace();
+        let is_control_user = self.control_users.contains(&message.author.id);
+        let is_private_channel = self.private_channels.contains(&message.channel_id);
+        let is_public_channel = self.public_channels.contains_key(&message.channel_id);
 
         match parts.next().unwrap_or("") {
             "" => {
@@ -301,13 +365,12 @@ impl EsBot {
                 self.send_message(&message.channel_id, MESSAGE_HELP);
             }
             "auth" | "authenticate" => {
-                if !self.private_channels.contains(&message.channel_id) {
+                if !is_private_channel {
                     self.send_message(&message.channel_id, MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE);
-
                     return;
                 }
 
-                if self.control_users.contains(&message.author.id) {
+                if is_control_user {
                     self.send_message(&message.channel_id, MESSAGE_AUTH_ALREADY_AUTHENTICATED);
                     return;
                 }
@@ -336,8 +399,6 @@ impl EsBot {
                 };
             }
             "stats" => {
-                let user_id = message.author.id;
-
                 match parts.next().unwrap_or("channel").to_lowercase().as_str() {
                     "global" => {
                         match self.command_stats_global() {
@@ -351,7 +412,7 @@ impl EsBot {
                         }
                     }
                     "server" | "guild" => {
-                        if !self.public_channels.contains_key(&message.channel_id) {
+                        if !is_public_channel {
                             self.send_message(&message.channel_id,
                                               MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
                             return;
@@ -371,7 +432,7 @@ impl EsBot {
                     }
                     "channel" => {
                         // TODO: Obtain channel ID from command argument
-                        if !self.public_channels.contains_key(&message.channel_id) {
+                        if !is_public_channel {
                             self.send_message(&message.channel_id,
                                               MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
                             return;
@@ -391,16 +452,33 @@ impl EsBot {
                         }
                     }
                     "user" => {
-                        // TODO: Obtain user ID from command argument
-                        match self.command_stats_user(&message.author) {
+                        let mut user_id = &message.author.id;
+                        let stats;
+
+                        if is_public_channel {
+                            // TODO: Obtain user ID from command argument
+                            let server_id = &self.public_channels.get(&message.channel_id).unwrap();
+                            stats =
+                                self.command_stats_user_favourite_emoji_for_server(user_id,
+                                                                                   server_id);
+                        } else {
+                            stats = self.command_stats_user_favourite_unicode_emoji(&user_id);
+                        }
+
+                        match stats {
                             Ok(stats) => {
-                                self.send_message(&message.channel_id, stats);
+                                self.send_message(&message.channel_id,
+                                                  format!("**<@{}>{}**\n{}",
+                                                          user_id.0,
+                                                          MESSAGE_STATS_USER,
+                                                          stats));
                             }
                             Err(_) => {
                                 self.send_message(&message.channel_id,
                                                   MESSAGE_ERROR_OBTAINING_STATS);
                             }
                         }
+
                     }
                     _ => {
                         self.send_message(&message.channel_id, MESSAGE_HELP_STATS);
@@ -430,16 +508,15 @@ impl EsBot {
 
     fn process_message_emojis(&self, message: &Message) {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let insert_emoji_usage_statement =
-            match db_conn.prepare_cached(PG_INSERT_EMOJI_USAGE_STATEMENT) {
-                Ok(insert_emoji_usage_statement) => insert_emoji_usage_statement,
-                Err(reason) => {
-                    error!("Error creating prepared statement: {}", reason);
-                    return;
-                }
-            };
-        let insert_message_statement = match db_conn.prepare_cached(PG_INSERT_MESSAGE_STATEMENT) {
-            Ok(insert_message_statement) => insert_message_statement,
+        let insert_emoji_usage = match db_conn.prepare_cached(PG_INSERT_EMOJI_USAGE) {
+            Ok(insert_emoji_usage) => insert_emoji_usage,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+        let insert_message = match db_conn.prepare_cached(PG_INSERT_MESSAGE) {
+            Ok(insert_message) => insert_message,
             Err(reason) => {
                 error!("Error creating prepared statement: {}", reason);
                 return;
@@ -460,7 +537,7 @@ impl EsBot {
 
                 let emoji_id = custom_emoji_id.0 as i64;
 
-                if let Err(reason) = insert_emoji_usage_statement
+                if let Err(reason) = insert_emoji_usage
                        .execute(&[&channel_id, &user_id, &emoji_id, &count]) {
                     error!("Eror inserting emoji usage: {}", reason);
                 }
@@ -472,8 +549,7 @@ impl EsBot {
         debug!("Message {} had {} emojis", message_id, total_emoji_count);
 
         if let Err(reason) =
-            insert_message_statement
-                .execute(&[&message_id, &channel_id, &user_id, &total_emoji_count]) {
+            insert_message.execute(&[&message_id, &channel_id, &user_id, &total_emoji_count]) {
             error!("Error inserting message: {}", reason);
         }
     }
@@ -488,21 +564,17 @@ impl EsBot {
 
     fn command_stats_channel(&self, channel_id: &ChannelId) -> Result<String, ()> {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let select_stats_channel_top_emoji_statement =
-            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_EMOJI_STATEMENT) {
-                Ok(select_stats_channel_top_emoji_statement) => {
-                    select_stats_channel_top_emoji_statement
-                }
+        let select_stats_channel_top_emoji =
+            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_EMOJI) {
+                Ok(select_stats_channel_top_emoji) => select_stats_channel_top_emoji,
                 Err(reason) => {
                     error!("Error creating prepared statement: {}", reason);
                     return Err(());
                 }
             };
-        let select_stats_channel_top_users_statement =
-            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_USERS_STATEMENT) {
-                Ok(select_stats_channel_top_users_statement) => {
-                    select_stats_channel_top_users_statement
-                }
+        let select_stats_channel_top_users =
+            match db_conn.prepare_cached(PG_select_stats_channel_top_users) {
+                Ok(select_stats_channel_top_users) => select_stats_channel_top_users,
                 Err(reason) => {
                     error!("Error creating prepared statement: {}", reason);
                     return Err(());
@@ -513,7 +585,7 @@ impl EsBot {
 
         let channel_id = &(channel_id.0 as i64);
 
-        match select_stats_channel_top_emoji_statement.query(&[channel_id]) {
+        match select_stats_channel_top_emoji.query(&[channel_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
                     stats = "No emoji have been used in this channel.".to_string();
@@ -537,7 +609,7 @@ impl EsBot {
             }
         }
 
-        match select_stats_channel_top_users_statement.query(&[channel_id]) {
+        match select_stats_channel_top_users.query(&[channel_id]) {
             Ok(rows) => {
                 if rows.len() > 0 {
                     for row in &rows {
@@ -545,10 +617,11 @@ impl EsBot {
                         let use_count = row.get::<usize, i64>(1);
                         let message_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("<@{}> has used {} emoji in {} messages\n",
+                        stats += &format!("<@{}> has used {} emoji in {} message{}\n",
                                 user_id,
                                 use_count,
-                                message_count);
+                                message_count,
+                                if message_count == 1 { "" } else { "s" });
                     }
                 }
             }
@@ -561,8 +634,94 @@ impl EsBot {
         Ok(stats)
     }
 
-    fn command_stats_user(&self, user: &User) -> Result<String, ()> {
-        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
+    fn command_stats_user_favourite_emoji_for_server(&self,
+                                                     user_id: &UserId,
+                                                     server_id: &ServerId)
+                                                     -> Result<String, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let stats_user_favourite_emoji_for_server =
+            match db_conn.prepare_cached(PG_SELECT_STATS_USER_FAVOURITE_EMOJI_FOR_SERVER) {
+                Ok(stats_user_favourite_emoji_for_server) => stats_user_favourite_emoji_for_server,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let mut stats: String = "".to_string();
+
+        let user_id = &(user_id.0 as i64);
+        let server_id = &(server_id.0 as i64);
+
+        match stats_user_favourite_emoji_for_server.query(&[user_id, server_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    stats = "This user has not used any emoji.".to_string();
+                } else {
+                    for row in &rows {
+                        let emoji_id = row.get::<usize, i64>(0) as u64;
+                        let emoji_name = row.get::<usize, String>(1);
+                        let use_count = row.get::<usize, i64>(2);
+
+                        stats += &format!("<:{}:{}> was used {} time{}\n",
+                                emoji_name,
+                                emoji_id,
+                                use_count,
+                                if use_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting user stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
+    }
+
+    fn command_stats_user_favourite_unicode_emoji(&self, user_id: &UserId) -> Result<String, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_user_favourite_unicode_emoji =
+            match db_conn.prepare_cached(PG_SELECT_STATS_USER_FAVOURITE_UNICODE_EMOJI) {
+                Ok(select_stats_user_favourite_unicode_emoji) => {
+                    select_stats_user_favourite_unicode_emoji
+                }
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let mut stats: String = "".to_string();
+
+        let user_id = &(user_id.0 as i64);
+
+        match select_stats_user_favourite_unicode_emoji.query(&[user_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    stats = "This user has not used any emoji.".to_string();
+                } else {
+                    for row in &rows {
+                        let emoji_id = row.get::<usize, i64>(0) as u64;
+                        let emoji_name = row.get::<usize, String>(1);
+                        let use_count = row.get::<usize, i64>(2);
+
+                        stats += &format!("<:{}:{}> was used {} time{}\n",
+                                emoji_name,
+                                emoji_id,
+                                use_count,
+                                if use_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting user stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
     }
 
     fn add_server(&mut self, server: &LiveServer) {
@@ -600,19 +759,18 @@ impl EsBot {
             debug!("Adding public channel: \"#{}\"", channel.name);
 
             let db_conn = self.db_conn.as_ref().unwrap();
-            let insert_public_channel_statement =
-                match db_conn.prepare_cached(PG_INSERT_PUBLIC_CHANNEL_STATEMENT) {
-                    Ok(prepared_stmt) => prepared_stmt,
-                    Err(reason) => {
-                        error!("Error creating prepared statement: {}", reason);
-                        return;
-                    }
-                };
+            let insert_public_channel = match db_conn.prepare_cached(PG_INSERT_PUBLIC_CHANNEL) {
+                Ok(prepared_stmt) => prepared_stmt,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return;
+                }
+            };
 
             let channel_id = channel.id.0 as i64;
             let guild_id = channel.server_id.0 as i64;
 
-            if let Err(reason) = insert_public_channel_statement
+            if let Err(reason) = insert_public_channel
                    .execute(&[&channel_id, &guild_id, &channel.name]) {
                 error!("Error inserting channel: {}", reason);
             }
@@ -623,22 +781,20 @@ impl EsBot {
 
     fn add_custom_emojis(&mut self, custom_emojis: &Vec<Emoji>) {
         let db_conn = self.db_conn.as_ref().unwrap();
-        let insert_custom_emoji_statement =
-            match db_conn.prepare_cached(PG_INSERT_CUSTOM_EMOJI_STATEMENT) {
-                Ok(prepared_stmt) => prepared_stmt,
-                Err(reason) => {
-                    error!("Error creating prepared statement: {}", reason);
-                    return;
-                }
-            };
+        let insert_custom_emoji = match db_conn.prepare_cached(PG_INSERT_CUSTOM_EMOJI) {
+            Ok(prepared_stmt) => prepared_stmt,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
 
         for custom_emoji in custom_emojis {
             let custom_emoji_name = format!("<:{}:{}>", custom_emoji.name, custom_emoji.id.0);
             debug!("Adding custom emoji: \"{}\"", custom_emoji_name);
 
             let emoji_id = custom_emoji.id.0 as i64;
-            if let Err(reason) = insert_custom_emoji_statement
-                   .execute(&[&emoji_id, &custom_emoji.name]) {
+            if let Err(reason) = insert_custom_emoji.execute(&[&emoji_id, &custom_emoji.name]) {
                 error!("Error inserting custom emoji: {}", reason);
             }
 
