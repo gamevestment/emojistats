@@ -72,6 +72,14 @@ GROUP BY e.id
 ORDER BY SUM(eu.use_count) DESC
 LIMIT 5
 OFFSET 0;";
+const PG_SELECT_STATS_CHANNEL_TOP_USERS_STATEMENT: &str = "
+SELECT eu.user_id, SUM(eu.use_count)
+FROM emoji_usage eu
+WHERE eu.public_channel_id = $1
+GROUP BY eu.user_id
+ORDER BY SUM(eu.use_count) DESC
+LIMIT 5
+OFFSET 0;";
 
 const MESSAGE_AUTH_ALREADY_AUTHENTICATED: &str = "\
 You have already authenticated.";
@@ -109,7 +117,7 @@ const MESSAGE_COMMAND_UNKNOWN: &str = "\
 Unknown command";
 
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
-**Top used emoji in this channel:**";
+**Top used emoji and emoji users in this channel:**";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
@@ -483,6 +491,16 @@ impl EsBot {
                     return Err(());
                 }
             };
+        let select_stats_channel_top_users_statement =
+            match db_conn.prepare_cached(PG_SELECT_STATS_CHANNEL_TOP_USERS_STATEMENT) {
+                Ok(select_stats_channel_top_users_statement) => {
+                    select_stats_channel_top_users_statement
+                }
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
 
         let mut stats: String = "".to_string();
 
@@ -503,6 +521,23 @@ impl EsBot {
                                 emoji_id,
                                 use_count,
                                 if use_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting channel stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        match select_stats_channel_top_users_statement.query(&[channel_id]) {
+            Ok(rows) => {
+                if rows.len() > 0 {
+                    for row in &rows {
+                        let user_id = row.get::<usize, i64>(0) as u64;
+                        let use_count = row.get::<usize, i64>(1);
+
+                        stats += &format!("<@{}> has used {} emoji\n", user_id, use_count);
                     }
                 }
             }
