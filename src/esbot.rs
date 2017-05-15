@@ -255,6 +255,10 @@ const MESSAGE_STATS_GLOBAL: &str = "\
 Top used Unicode emoji globally:";
 const MESSAGE_STATS_SERVER: &str = "\
 Top used Unicode emoji on this server:";
+const MESSAGE_STATS_CHANNEL: &str = "\
+Top used emoji and emoji users in ";
+const MESSAGE_STATS_CHANNEL_INVALID_CHANNEL: &str = "\
+Please specify a valid #channel.";
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
 Top used emoji and emoji users in this channel:";
 const MESSAGE_STATS_USER_FOR_SERVER: &str = "\
@@ -541,19 +545,48 @@ impl EsBot {
                         }
                     }
                     "channel" => {
-                        // TODO: Obtain channel ID from command argument
                         if !is_public_channel {
                             self.send_message(&message.channel_id,
                                               MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
                             return;
                         }
 
-                        match self.command_stats_channel(&message.channel_id) {
-                            Ok(stats) => {
+                        let mut channel_id = message.channel_id;
+
+                        if let Some(channel_arg) = parts.next() {
+                            if channel_arg.len() > 4 && channel_arg.starts_with("<#") &&
+                               channel_arg.ends_with(">") {
+                                match channel_arg[2..(channel_arg.len() - 1)].parse::<u64>() {
+                                    Ok(id) => {
+                                        channel_id = ChannelId(id);
+                                    }
+                                    Err(_) => {
+                                        self.send_message(&message.channel_id,
+                                                          MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
+                                        return;
+                                    }
+                                }
+                            } else {
                                 self.send_message(&message.channel_id,
-                                                  format!("**{}**\n{}",
-                                                          MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
-                                                          stats));
+                                                  MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
+                                return;
+                            }
+                        }
+
+                        match self.command_stats_channel(&channel_id) {
+                            Ok(stats) => {
+                                if channel_id == message.channel_id {
+                                    self.send_message(&message.channel_id,
+                                                      format!("**{}**\n{}",
+                                                              MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
+                                                              stats));
+                                } else {
+                                    self.send_message(&message.channel_id,
+                                                      format!("**{} <#{}>:**\n{}",
+                                                              MESSAGE_STATS_CHANNEL,
+                                                              channel_id.0,
+                                                              stats));
+                                }
                             }
                             Err(_) => {
                                 self.send_message(&message.channel_id,
