@@ -249,8 +249,8 @@ const MESSAGE_STATS_SERVER: &str = "\
 Top used Unicode emoji on this server:";
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
 Top used emoji and emoji users in this channel:";
-const MESSAGE_STATS_USER: &str = "\
-'s favourite emoji:";
+const MESSAGE_STATS_USER_FOR_SERVER: &str = "\
+'s favourite emoji on this server:";
 const MESSAGE_STATS_USER_UNICODE: &str = "\
 's favourite Unicode emoji:";
 
@@ -273,6 +273,7 @@ pub struct EsBot {
 
     discord: Option<discord::Discord>,
     db_conn: Option<postgres::Connection>,
+    bot_user_id: UserId,
     quit: bool,
 }
 
@@ -294,6 +295,7 @@ impl EsBot {
 
             discord: None,
             db_conn: None,
+            bot_user_id: UserId(0),
             quit: false,
         }
     }
@@ -350,6 +352,7 @@ impl EsBot {
 
         // Let users invoke commands from public channels
         self.command_prefix = format!("<@{}>", ready_event.user.id.0);
+        self.bot_user_id = ready_event.user.id;
 
         // Main loop
         self.discord = Some(discord);
@@ -535,7 +538,17 @@ impl EsBot {
                         let stats;
 
                         if is_public_channel {
-                            // TODO: Obtain user ID from command argument
+                            // message.mentions might not be sorted in order of
+                            // mentions in the message, but that's okay
+                            for mentioned_user in &message.mentions {
+                                if mentioned_user.id == self.bot_user_id {
+                                    continue;
+                                }
+
+                                user_id = &mentioned_user.id;
+                                break;
+                            }
+
                             let server_id = &self.public_channels.get(&message.channel_id).unwrap();
                             stats =
                                 self.command_stats_user_favourite_emoji_for_server(user_id,
@@ -550,7 +563,7 @@ impl EsBot {
                                                   format!("**<@{}>{}**\n{}",
                                                           user_id.0,
                                                           if is_public_channel {
-                                                              MESSAGE_STATS_USER
+                                                              MESSAGE_STATS_USER_FOR_SERVER
                                                           } else {
                                                               MESSAGE_STATS_USER_UNICODE
                                                           },
