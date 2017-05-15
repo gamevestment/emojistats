@@ -263,6 +263,8 @@ const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
 Top used emoji and emoji users in this channel:";
 const MESSAGE_STATS_USER_FOR_SERVER: &str = "\
 's favourite emoji on this server:";
+const MESSAGE_STATS_USER_INVALID_USER: &str = "\
+Please mention a valid @user.";
 const MESSAGE_STATS_USER_UNICODE: &str = "\
 's favourite Unicode emoji:";
 
@@ -554,7 +556,7 @@ impl EsBot {
                         let mut channel_id = message.channel_id;
 
                         if let Some(channel_arg) = parts.next() {
-                            if channel_arg.len() > 4 && channel_arg.starts_with("<#") &&
+                            if channel_arg.len() > 3 && channel_arg.starts_with("<#") &&
                                channel_arg.ends_with(">") {
                                 match channel_arg[2..(channel_arg.len() - 1)].parse::<u64>() {
                                     Ok(id) => {
@@ -595,24 +597,35 @@ impl EsBot {
                         }
                     }
                     "user" => {
-                        let mut user_id = &message.author.id;
+                        let mut user_id = message.author.id;
                         let stats;
 
                         if is_public_channel {
-                            // message.mentions might not be sorted in order of
-                            // mentions in the message, but that's okay
-                            for mentioned_user in &message.mentions {
-                                if mentioned_user.id == self.bot_user_id {
-                                    continue;
+                            if let Some(user_arg) = parts.next() {
+                                debug!("Command: {}", command_str);
+                                debug!("Arg: {}", user_arg);
+                                if user_arg.len() > 4 && user_arg.starts_with("<@!") &&
+                                   user_arg.ends_with(">") {
+                                    match user_arg[3..(user_arg.len() - 1)].parse::<u64>() {
+                                        Ok(id) => {
+                                            user_id = UserId(id);
+                                        }
+                                        Err(_) => {
+                                            self.send_message(&message.channel_id,
+                                                              MESSAGE_STATS_USER_INVALID_USER);
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    self.send_message(&message.channel_id,
+                                                      MESSAGE_STATS_USER_INVALID_USER);
+                                    return;
                                 }
-
-                                user_id = &mentioned_user.id;
-                                break;
                             }
 
                             let server_id = &self.public_channels.get(&message.channel_id).unwrap();
                             stats =
-                                self.command_stats_user_favourite_emoji_for_server(user_id,
+                                self.command_stats_user_favourite_emoji_for_server(&user_id,
                                                                                    server_id);
                         } else {
                             stats = self.command_stats_user_favourite_unicode_emoji(&user_id);
