@@ -81,6 +81,50 @@ LIMIT
     5
 OFFSET
     0;";
+const PG_SELECT_STATS_SERVER_TOP_EMOJI: &str = "
+SELECT
+    e.id,
+    e.name,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+    INNER JOIN public_channel pc ON eu.public_channel_id = pc.id
+WHERE
+    pc.guild_id = $1
+GROUP BY
+    e.id
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0;";
+const PG_SELECT_STATS_SERVER_TOP_USERS: &str = "
+SELECT
+    eu.user_id,
+    SUM(eu.use_count),
+    (SELECT
+        COUNT(*)
+    FROM
+        message m
+        INNER JOIN public_channel pc2 ON m.public_channel_id = pc2.id
+    WHERE
+        m.user_id = eu.user_id AND
+        pc2.guild_id = $1)
+FROM
+    emoji_usage eu
+    INNER JOIN public_channel pc ON eu.public_channel_id = pc.id
+WHERE
+    pc.guild_id = $1
+GROUP BY
+    eu.user_id
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0;";
 const PG_SELECT_STATS_CHANNEL_TOP_EMOJI: &str = "
 SELECT
     e.id,
@@ -201,6 +245,8 @@ Unknown command";
 
 const MESSAGE_STATS_GLOBAL: &str = "\
 Top used Unicode emoji globally:";
+const MESSAGE_STATS_SERVER: &str = "\
+Top used Unicode emoji on this server:";
 const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
 Top used emoji and emoji users in this channel:";
 const MESSAGE_STATS_USER: &str = "\
@@ -420,7 +466,13 @@ impl EsBot {
                 };
             }
             "stats" => {
-                match parts.next().unwrap_or("channel").to_lowercase().as_str() {
+                let default_stats = if is_public_channel { "channel" } else { "user" };
+
+                match parts
+                          .next()
+                          .unwrap_or(default_stats)
+                          .to_lowercase()
+                          .as_str() {
                     "global" => {
                         match self.command_stats_global() {
                             Ok(stats) => {
@@ -445,7 +497,10 @@ impl EsBot {
                         if let Some(server_id) = self.public_channels.get(&message.channel_id) {
                             match self.command_stats_server(server_id) {
                                 Ok(stats) => {
-                                    self.send_message(&message.channel_id, stats);
+                                    self.send_message(&message.channel_id,
+                                                      format!("**{}**\n{}",
+                                                              MESSAGE_STATS_SERVER,
+                                                              stats));
                                 }
                                 Err(_) => {
                                     self.send_message(&message.channel_id,
@@ -620,7 +675,75 @@ impl EsBot {
     }
 
     fn command_stats_server(&self, server_id: &ServerId) -> Result<String, ()> {
-        Ok(format!("Top: {} with {} uses", "emoji_name", 1))
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_server_top_emoji =
+            match db_conn.prepare_cached(PG_SELECT_STATS_SERVER_TOP_EMOJI) {
+                Ok(select_stats_server_top_emoji) => select_stats_server_top_emoji,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+        let select_stats_server_top_users =
+            match db_conn.prepare_cached(PG_SELECT_STATS_SERVER_TOP_USERS) {
+                Ok(select_stats_server_top_users) => select_stats_server_top_users,
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let mut stats: String = "".to_string();
+
+        let server_id = &(server_id.0 as i64);
+
+        match select_stats_server_top_emoji.query(&[server_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    stats = "No emoji have been used on this server.".to_string();
+                } else {
+                    for row in &rows {
+                        let emoji_id = row.get::<usize, i64>(0) as u64;
+                        let emoji_name = row.get::<usize, String>(1);
+                        let use_count = row.get::<usize, i64>(2);
+
+                        stats += &format!("<:{}:{}> was used {} time{}\n",
+                                emoji_name,
+                                emoji_id,
+                                use_count,
+                                if use_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting server stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        match select_stats_server_top_users.query(&[server_id]) {
+            Ok(rows) => {
+                if rows.len() > 0 {
+                    for row in &rows {
+                        let user_id = row.get::<usize, i64>(0) as u64;
+                        let use_count = row.get::<usize, i64>(1);
+                        let message_count = row.get::<usize, i64>(2);
+
+                        stats += &format!("<@{}> has used {} emoji in {} message{}\n",
+                                user_id,
+                                use_count,
+                                message_count,
+                                if message_count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting server stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
     }
 
     fn command_stats_channel(&self, channel_id: &ChannelId) -> Result<String, ()> {
