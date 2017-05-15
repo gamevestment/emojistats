@@ -45,21 +45,19 @@ fn init_logging() {
         .build();
     let stdout_appender = log4rs::config::Appender::builder().build("stdout", Box::new(stdout));
 
-    let logger = log4rs::config::Logger::builder()
-        .appender("file")
-        .appender("stdout")
-        .build(PROGRAM_NAME, log_level_filter);
-
+    let mut logger = log4rs::config::Logger::builder();
     let mut root = log4rs::config::Root::builder();
 
     if cfg!(debug_assertions) {
         root = root.appender("file").appender("stdout");
+    } else {
+        logger = logger.appender("file").appender("stdout");
     }
 
     let config = log4rs::config::Config::builder()
         .appender(file_appender)
         .appender(stdout_appender)
-        .logger(logger)
+        .logger(logger.build(PROGRAM_NAME, log_level_filter))
         .build(root.build(log_level_filter))
         .expect("Failed to build logging configuration");
 
