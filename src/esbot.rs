@@ -392,7 +392,23 @@ impl EsBot {
     }
 
     fn process_message(&mut self, message: &Message) {
-        // TODO: Ensure that the message channel ID is known
+        // If the bot doesn't know about this channel for some reason, add it
+        if !self.private_channels.contains(&message.channel_id) &&
+           self.public_channels.get(&message.channel_id).is_none() {
+            match self.discord
+                      .as_ref()
+                      .unwrap()
+                      .get_channel(message.channel_id) {
+                Ok(channel) => {
+                    self.add_channel(&channel);
+                }
+                Err(reason) => {
+                    warn!("Received message from unknown channel {}",
+                          &message.channel_id);
+                    return;
+                }
+            }
+        }
 
         if message.content.starts_with(&self.command_prefix) {
             let mut command_str = "";
