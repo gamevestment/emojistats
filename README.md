@@ -1,6 +1,6 @@
 # emojistats-bot
 
-A Discord bot that provides statistics on emoji usage.
+A Discord bot that provides statistics on emoji usage. Built with [discord-rs](https://github.com/SpaceManiac/discord-rs).
 
 ## Commands
 
@@ -10,27 +10,29 @@ To use a command, mention the bot at the beginning of the message; for example:
 @EmojiStats stats global
 ```
 
-Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot. You may not use `stats server` or `stats channel` through direct messages.
+Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot.
 
-When obtaining server, channel, or user stats in a public text channel, the stats returned will include custom emoji on that server.
-
-When obtaining global stats or when obtaining stats for yourself in a direct message, the stats returned will be for Unicode emoji only.
+**Note:**
+- When obtaining server, channel, or user stats in a public text channel, the stats returned will include custom emoji on that server.
+- When obtaining global stats or when obtaining stats for yourself in a direct message, the stats returned will be for Unicode emoji only.
 
 ### General
 
-|           Command           |                                   Description                                   |
-|-----------------------------|---------------------------------------------------------------------------------|
-|`stats global`               |See the top used Unicode emoji globally                                          |
-|`stats server`               |See the top used emoji on this server                                            |
-|`stats channel [<#channel>]]`|See the top used emoji on the specified channel (defaults to the current channel)|
-|`stats user [<@user>]`       |See the specified user's favourite emoji (defaults to yourself)                  |
+|           Command          |   Where you can use it  |                                   Description                                           |
+|----------------------------|-------------------------|-----------------------------------------------------------------------------------------|
+|`about`                     |Anywhere                 |See information about the bot                                                            |
+|`stats`                     |Anywhere                 |Alias for `stats channel` in public text channels and for `stats user` in direct messages|
+|`stats global`              |Anywhere                 |See the top used Unicode emoji globally                                                  |
+|`stats server`              |Public text channels only|See the top used emoji on this server                                                    |
+|`stats channel [<#channel>]`|Public text channels only|See the top used emoji on the specified channel (defaults to the current channel)        |
+|`stats user [<@user>]`      |Anywhere                 |See the specified user's favourite emoji (defaults to yourself)                          |
 
 ### Bot control
 
-|             Command             |                            Description                              |
-|---------------------------------|---------------------------------------------------------------------|
-|`auth \| authenticate <password>`|Attempts to authenticate with the bot using the bot control password.|
-|`quit`                           |Shuts down the bot. You must be authenticated to use this command.   |
+|     Command     |                            Description                              |
+|-----------------|---------------------------------------------------------------------|
+|`auth <password>`|Attempts to authenticate with the bot using the bot control password.|
+|`quit`           |Shuts down the bot. You must be authenticated to use this command.   |
 
 
 ## Requirements

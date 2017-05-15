@@ -223,11 +223,14 @@ const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
 An error occurred while obtaining the statistics.";
 const MESSAGE_HELP: &str = "\
 **Commands:**
-`stats global`: See the top used emoji globally
-`stats server`: See the top used emoji on this server
-`stats channel [<#channel>]`: See the top used emoji on this channel \
+**about**: See information about the bot
+**stats**: Alias for **stats channel** in public text channels and for \
+    **stats user** in direct messages
+**stats global**: See the top used Unicode emoji globally
+**stats server**: See the top used emoji on this server
+**stats channel [<#channel>]**: See the top used emoji on the specified channel \
     (defaults to the current channel)
-`stats user [<@user>]`: See the specified user's most used emoji (defaults to yourself)";
+**stats user [<@user>]**: See the specified user's favourite emoji (defaults to yourself)";
 const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
 const MESSAGE_HELP_STATS: &str = "\
@@ -242,6 +245,11 @@ const MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL: &str = "\
 This command may only be used in public chat channels.";
 const MESSAGE_COMMAND_UNKNOWN: &str = "\
 Unknown command";
+
+const MESSAGE_ABOUT: &str = "\
+**EmojiStats**
+A Discord bot that provides statistics on emoji usage. Built with discord-rs.
+https://github.com/quailiff/emojistats-bot";
 
 const MESSAGE_STATS_GLOBAL: &str = "\
 Top used Unicode emoji globally:";
@@ -405,6 +413,7 @@ impl EsBot {
                 Err(reason) => {
                     warn!("Received message from unknown channel {}",
                           &message.channel_id);
+                    warn!("Failed to look up channel: {}", reason);
                     return;
                 }
             }
@@ -449,6 +458,9 @@ impl EsBot {
             }
             "help" => {
                 self.send_message(&message.channel_id, MESSAGE_HELP);
+            }
+            "about" => {
+                self.send_message(&message.channel_id, MESSAGE_ABOUT);
             }
             "auth" | "authenticate" => {
                 if !is_private_channel {
