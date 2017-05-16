@@ -3,11 +3,16 @@ extern crate dotenv;
 extern crate log;
 extern crate log4rs;
 
+use std::io::{BufReader, BufRead};
+use std::fs::File;
+use std::path::Path;
+
 mod esbot;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LOG_FILENAME: &str = "emojistats.log";
+const DEFAULT_UNICODE_EMOJI_FILENAME: &str = "unicode-emoji.txt";
 const LOG_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}";
 
 const EXIT_STATUS_BOT_TOKEN_MISSING: i32 = 1;
@@ -145,7 +150,48 @@ fn main() {
     debug!("Connecting to \"{}\"", pg_conn_str_redacted);
 
     let mut eb = esbot::EsBot::new(pg_conn_str, bot_token, bot_control_password);
-    let exit_status = eb.run();
+
+    let mut unicode_emojis: Vec<(String, String)> = Vec::new();
+
+    let unicode_emoji_filename = get_env_string("ES_UNICODE_EMOJI_FILENAME")
+        .unwrap_or(DEFAULT_UNICODE_EMOJI_FILENAME.to_string());
+
+    match File::open(Path::new(&unicode_emoji_filename)) {
+        Ok(file) => {
+            for line in BufReader::new(file).lines() {
+                match line {
+                    Ok(line) => {
+                        let line = line.trim();
+
+                        // Skip empty lines and comments
+                        if line.is_empty() || line.starts_with("#") {
+                            continue;
+                        }
+
+                        let parts: Vec<&str> = line.split("=>").collect();
+
+                        if parts.len() != 2 {
+                            warn!("Invalid line: \"{}\"", line);
+                            continue;
+                        }
+
+                        unicode_emojis
+                            .push((parts[0].trim().to_string(), parts[1].trim().to_string()));
+                    }
+                    Err(reason) => {
+                        warn!("Error during reading of Unicode emoji: {}", reason);
+                    }
+                }
+            }
+        }
+        Err(reason) => {
+            warn!("Failed to load Unicode emoji file \"{}\": {}",
+                  unicode_emoji_filename,
+                  reason);
+        }
+    };
+
+    let exit_status = eb.run(&unicode_emojis);
 
     std::process::exit(exit_status);
 }

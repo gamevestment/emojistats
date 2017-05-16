@@ -37,15 +37,21 @@ CREATE TABLE IF NOT EXISTS emoji_usage (
     FOREIGN KEY (public_channel_id) REFERENCES public_channel (id),
     FOREIGN KEY (emoji_id) REFERENCES emoji (id)
 );";
-#[allow(unused)]
-const PG_INSERT_EMOJI: &str = "
-INSERT INTO emoji (name, is_custom_emoji)
-VALUES ($1, FALSE);";
 const PG_INSERT_CUSTOM_EMOJI: &str = "
 INSERT INTO emoji (id, name, is_custom_emoji)
 VALUES ($1, $2, TRUE)
 ON CONFLICT (id) DO UPDATE
     SET name = excluded.name;";
+const PG_SELECT_UNICODE_EMOJI: &str = "
+SELECT
+    id
+FROM
+    emoji e
+WHERE
+    e.name = $1;";
+const PG_INSERT_UNICODE_EMOJI: &str = "
+INSERT INTO emoji (name, is_custom_emoji)
+VALUES ($1, FALSE);";
 const PG_INSERT_PUBLIC_CHANNEL: &str = "
 INSERT INTO public_channel (id, guild_id, name)
 VALUES ($1, $2, $3)
@@ -280,7 +286,7 @@ pub struct EsBot {
 
     private_channels: Vec<ChannelId>,
     public_channels: HashMap<ChannelId, ServerId>,
-    emojis: HashMap<char, u64>,
+    unicode_emojis: HashMap<(String, String), EmojiId>,
     custom_emojis: HashMap<EmojiId, String>,
     control_users: Vec<UserId>,
     command_prefix: String,
@@ -302,7 +308,7 @@ impl EsBot {
 
             private_channels: Vec::new(),
             public_channels: HashMap::new(),
-            emojis: HashMap::new(),
+            unicode_emojis: HashMap::new(),
             custom_emojis: HashMap::new(),
             control_users: Vec::new(),
             command_prefix: "".to_string(),
@@ -314,7 +320,7 @@ impl EsBot {
         }
     }
 
-    pub fn run(&mut self) -> i32 {
+    pub fn run(&mut self, unicode_emojis: &Vec<(String, String)>) -> i32 {
         // Connect to database
         let db_conn = match postgres::Connection::connect(self.db_conn_str.as_str(),
                                                           postgres::TlsMode::None) {
@@ -371,6 +377,7 @@ impl EsBot {
         // Main loop
         self.discord = Some(discord);
         self.db_conn = Some(db_conn);
+        self.add_unicode_emojis(unicode_emojis);
 
         loop {
             match discord_conn.recv_event() {
@@ -709,7 +716,26 @@ impl EsBot {
 
                 if let Err(reason) = insert_emoji_usage
                        .execute(&[&channel_id, &user_id, &emoji_id, &count]) {
-                    error!("Eror inserting emoji usage: {}", reason);
+                    error!("Error inserting emoji usage: {}", reason);
+                }
+            }
+
+            total_emoji_count += count;
+        }
+
+        for (unicode_emoji_pair, unicode_emoji_id) in &self.unicode_emojis {
+            let unicode_emoji = &unicode_emoji_pair.0;
+
+            let count = message.content.matches(unicode_emoji).count() as i32;
+
+            if count > 0 {
+                debug!("{} instances of \"{}\"", count, unicode_emoji);
+
+                let emoji_id = unicode_emoji_id.0 as i64;
+
+                if let Err(reason) = insert_emoji_usage
+                       .execute(&[&channel_id, &user_id, &emoji_id, &count]) {
+                    error!("Error inserting emoji usage: {}", reason);
                 }
             }
 
@@ -1031,7 +1057,7 @@ impl EsBot {
 
             let db_conn = self.db_conn.as_ref().unwrap();
             let insert_public_channel = match db_conn.prepare_cached(PG_INSERT_PUBLIC_CHANNEL) {
-                Ok(prepared_stmt) => prepared_stmt,
+                Ok(insert_public_channel) => insert_public_channel,
                 Err(reason) => {
                     error!("Error creating prepared statement: {}", reason);
                     return;
@@ -1053,7 +1079,7 @@ impl EsBot {
     fn add_custom_emojis(&mut self, custom_emojis: &Vec<Emoji>) {
         let db_conn = self.db_conn.as_ref().unwrap();
         let insert_custom_emoji = match db_conn.prepare_cached(PG_INSERT_CUSTOM_EMOJI) {
-            Ok(prepared_stmt) => prepared_stmt,
+            Ok(insert_custom_emoji) => insert_custom_emoji,
             Err(reason) => {
                 error!("Error creating prepared statement: {}", reason);
                 return;
@@ -1074,6 +1100,84 @@ impl EsBot {
         }
     }
 
+    fn add_unicode_emojis(&mut self, unicode_emojis: &Vec<(String, String)>) {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_unicode_emoji = match db_conn.prepare_cached(PG_SELECT_UNICODE_EMOJI) {
+            Ok(select_unicode_emoji) => select_unicode_emoji,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+        let insert_unicode_emoji = match db_conn.prepare_cached(PG_INSERT_UNICODE_EMOJI) {
+            Ok(insert_unicode_emoji) => insert_unicode_emoji,
+            Err(reason) => {
+                error!("Error creating prepared statement: {}", reason);
+                return;
+            }
+        };
+
+        for emoji_info in unicode_emojis {
+            let emoji = &emoji_info.0;
+            let emoji_desc = &emoji_info.1;
+
+            // Check whether the emoji is already in the database
+            match select_unicode_emoji.query(&[emoji]) {
+                Ok(rows) => {
+                    if rows.len() > 0 {
+                        let emoji_id = rows.get(0).get::<usize, i64>(0) as u64;
+                        self.unicode_emojis.insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
+                        continue;
+                    }
+                }
+                Err(reason) => {
+                    warn!("Error selecting ID for Unicode emoji \"{}\" (\"{}\"): {}",
+                          emoji,
+                          emoji_desc,
+                          reason);
+                    continue;
+                }
+            }
+
+            // Insert the emoji into the database
+            match insert_unicode_emoji.execute(&[emoji]) {
+                Ok(rows_affected) => {
+                    if rows_affected < 1 {
+                        warn!("Unicode emoji \"{}\" (\"{}\") not inserted into database",
+                              emoji,
+                              emoji_desc);
+                        continue;
+                    }
+                }
+                Err(reason) => {
+                    warn!("Error inserting Unicode emoji \"{}\" (\"{}\") into database: {}",
+                          emoji,
+                          emoji_desc,
+                          reason);
+                    continue;
+                }
+            }
+
+            match select_unicode_emoji.query(&[emoji]) {
+                Ok(rows) => {
+                    for row in &rows {
+                        let emoji_id = row.get::<usize, i64>(0) as u64;
+                        self.unicode_emojis
+                            .insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
+                        continue;
+                    }
+                }
+                Err(reason) => {
+                    warn!("Error selecting ID for inserted Unicode emoji \"{}\" (\"{}\"): {}",
+                          emoji,
+                          emoji_desc,
+                          reason);
+                    continue;
+                }
+            }
+        }
+    }
+
     fn send_message<S>(&self, channel_id: &ChannelId, message: S)
         where S: Into<String>
     {
@@ -1082,4 +1186,8 @@ impl EsBot {
             .unwrap()
             .send_message(*channel_id, &message.into(), "", false);
     }
+
+    // TODO: Helper function that returns prepared statements?
+    // TODO: Create HashMap<ServerId, HashMap<EmojiId, String>> so that message
+    // processing only needs to search custom emoji on the same server
 }
