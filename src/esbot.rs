@@ -1126,7 +1126,8 @@ impl EsBot {
                 Ok(rows) => {
                     if rows.len() > 0 {
                         let emoji_id = rows.get(0).get::<usize, i64>(0) as u64;
-                        self.unicode_emojis.insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
+                        self.unicode_emojis
+                            .insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
                         continue;
                     }
                 }
