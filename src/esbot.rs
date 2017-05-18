@@ -91,7 +91,8 @@ const PG_SELECT_STATS_SERVER_TOP_EMOJI: &str = "
 SELECT
     e.id,
     e.name,
-    SUM(eu.use_count)
+    SUM(eu.use_count),
+    e.is_custom_emoji
 FROM
     emoji_usage eu
     INNER JOIN emoji e ON eu.emoji_id = e.id
@@ -135,7 +136,8 @@ const PG_SELECT_STATS_CHANNEL_TOP_EMOJI: &str = "
 SELECT
     e.id,
     e.name,
-    SUM(eu.use_count)
+    SUM(eu.use_count),
+    e.is_custom_emoji
 FROM
     emoji_usage eu
     INNER JOIN emoji e ON eu.emoji_id = e.id
@@ -176,7 +178,8 @@ const PG_SELECT_STATS_USER_FAVOURITE_EMOJI_FOR_SERVER: &str = "
 SELECT
     e.id,
     e.name,
-    SUM(eu.use_count)
+    SUM(eu.use_count),
+    e.is_custom_emoji
 FROM
     emoji_usage eu
     INNER JOIN emoji e ON eu.emoji_id = e.id
@@ -819,12 +822,20 @@ impl EsBot {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
                         let emoji_name = row.get::<usize, String>(1);
                         let use_count = row.get::<usize, i64>(2);
+                        let is_custom_emoji = row.get::<usize, bool>(3);
 
-                        stats += &format!("<:{}:{}> was used {} time{}\n",
-                                emoji_name,
-                                emoji_id,
-                                use_count,
-                                if use_count == 1 { "" } else { "s" });
+                        if is_custom_emoji {
+                            stats += &format!("<:{}:{}> was used {} time{}\n",
+                                    emoji_name,
+                                    emoji_id,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        } else {
+                            stats += &format!("{} was used {} time{}\n",
+                                    emoji_name,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        }
                     }
                 }
             }
@@ -891,12 +902,20 @@ impl EsBot {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
                         let emoji_name = row.get::<usize, String>(1);
                         let use_count = row.get::<usize, i64>(2);
+                        let is_custom_emoji = row.get::<usize, bool>(3);
 
-                        stats += &format!("<:{}:{}> was used {} time{}\n",
-                                emoji_name,
-                                emoji_id,
-                                use_count,
-                                if use_count == 1 { "" } else { "s" });
+                        if is_custom_emoji {
+                            stats += &format!("<:{}:{}> was used {} time{}\n",
+                                    emoji_name,
+                                    emoji_id,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        } else {
+                            stats += &format!("{} was used {} time{}\n",
+                                    emoji_name,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        }
                     }
                 }
             }
@@ -959,12 +978,20 @@ impl EsBot {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
                         let emoji_name = row.get::<usize, String>(1);
                         let use_count = row.get::<usize, i64>(2);
+                        let is_custom_emoji = row.get::<usize, bool>(3);
 
-                        stats += &format!("<:{}:{}> was used {} time{}\n",
-                                emoji_name,
-                                emoji_id,
-                                use_count,
-                                if use_count == 1 { "" } else { "s" });
+                        if is_custom_emoji {
+                            stats += &format!("<:{}:{}> was used {} time{}\n",
+                                    emoji_name,
+                                    emoji_id,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        } else {
+                            stats += &format!("{} was used {} time{}\n",
+                                    emoji_name,
+                                    use_count,
+                                    if use_count == 1 { "" } else { "s" });
+                        }
                     }
                 }
             }
