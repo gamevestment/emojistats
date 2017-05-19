@@ -277,10 +277,11 @@ Please mention a valid @user.";
 const MESSAGE_STATS_USER_UNICODE: &str = "\
 's favourite Unicode emoji:";
 
-const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 3;
-const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 4;
-const EXIT_STATUS_DISCORD_COULDNT_AUTHENTICATE: i32 = 10;
-const EXIT_STATUS_DISCORD_COULDNT_CONNECT: i32 = 11;
+const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 100;
+const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 101;
+const EXIT_STATUS_DISCORD_COULDNT_AUTHENTICATE: i32 = 110;
+const EXIT_STATUS_DISCORD_COULDNT_CONNECT: i32 = 111;
+pub const EXIT_STATUS_RESTART: i32 = 190;
 
 pub struct EsBot {
     db_conn_str: String,
@@ -298,6 +299,7 @@ pub struct EsBot {
     db_conn: Option<postgres::Connection>,
     bot_user_id: UserId,
     quit: bool,
+    restart: bool,
 }
 
 impl EsBot {
@@ -320,6 +322,7 @@ impl EsBot {
             db_conn: None,
             bot_user_id: UserId(0),
             quit: false,
+            restart: false,
         }
     }
 
@@ -412,6 +415,10 @@ impl EsBot {
 
         let _ = self.db_conn.take().unwrap().finish();
         let _ = discord_conn.shutdown();
+
+        if self.restart {
+            return EXIT_STATUS_RESTART;
+        }
         0
     }
 
@@ -675,6 +682,18 @@ impl EsBot {
                       &message.author.id.0,
                       &message.author.name);
                 self.quit = true;
+            }
+            "restart" => {
+                if !self.control_users.contains(&message.author.id) {
+                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
+                    return;
+                }
+
+                info!("Restarting per {}:\"{}\"",
+                      &message.author.id.0,
+                      &message.author.name);
+                self.quit = true;
+                self.restart = true;
             }
             unknown_command => {
                 self.send_message(&message.channel_id,

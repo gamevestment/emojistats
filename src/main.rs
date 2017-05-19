@@ -2,10 +2,14 @@ extern crate dotenv;
 #[macro_use]
 extern crate log;
 extern crate log4rs;
+extern crate nix;
 
 use std::io::{BufReader, BufRead};
 use std::fs::File;
 use std::path::Path;
+use std::env::current_exe;
+use nix::unistd::execv;
+use std::ffi::CString;
 
 mod esbot;
 
@@ -17,6 +21,7 @@ const LOG_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}";
 
 const EXIT_STATUS_BOT_TOKEN_MISSING: i32 = 1;
 const EXIT_STATUS_DB_CONFIG_INVALID: i32 = 2;
+const EXIT_STATUS_UNABLE_TO_RESTART: i32 = 11;
 
 fn get_env_string(key: &str) -> Option<String> {
     let value = dotenv::var(key)
@@ -123,6 +128,8 @@ fn pg_get_conn_str() -> Result<(String, String), String> {
 }
 
 fn main() {
+    let exec_name = current_exe();
+
     dotenv::dotenv().ok();
     init_logging();
 
@@ -192,6 +199,41 @@ fn main() {
     };
 
     let exit_status = eb.run(&unicode_emojis);
+
+    if exit_status == esbot::EXIT_STATUS_RESTART {
+        let pathbuf = match exec_name {
+            Ok(pathbuf) => pathbuf,
+            Err(reason) => {
+                error!("Unable to obtain executable name: {}", reason);
+                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
+            }
+        };
+
+        let exec_path_str = match pathbuf.as_os_str().to_str() {
+            Some(exec_path_str) => exec_path_str,
+            None => {
+                error!("Unable to convert \"{:?}\" to str", pathbuf);
+                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
+            }
+        };
+
+        let exec_path_cstring = match CString::new(exec_path_str) {
+            Ok(exec_path_cstring) => exec_path_cstring,
+            Err(reason) => {
+                error!("Unable to convert executable path \"{}\" to CString: {}",
+                       exec_path_str,
+                       reason);
+                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
+            }
+        };
+
+        match execv(&exec_path_cstring, &[]) {
+            Err(reason) => {
+                error!("Unable to restart \"{}\": {}", exec_path_str, reason);
+            }
+            _ => {}
+        };
+    }
 
     std::process::exit(exit_status);
 }
