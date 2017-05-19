@@ -233,17 +233,13 @@ An error occurred while obtaining the statistics.";
 const MESSAGE_HELP: &str = "\
 **Commands:**
 **about**: See information about the bot
-**stats**: Alias for **stats channel** in public text channels and for \
-    **stats user** in direct messages
-**stats global**: See the top used Unicode emoji globally
-**stats server**: See the top used emoji on this server
-**stats channel [<#channel>]**: See the top used emoji on the specified channel \
+**global**: See the top used Unicode emoji globally
+**server**: See the top used emoji on this server
+**channel [<#channel>]**: See the top used emoji on the specified channel \
     (defaults to the current channel)
-**stats user [<@user>]**: See the specified user's favourite emoji (defaults to yourself)";
+**user [<@user>]**: See the specified user's favourite emoji (defaults to yourself)";
 const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
-const MESSAGE_HELP_STATS: &str = "\
-Usage: `stats [global | server | channel [<#channel>] | user [<@user>]]`";
 
 #[allow(unused)]
 const MESSAGE_COMMAND_NOT_IMPLEMENTED: &str = "\
@@ -519,158 +515,131 @@ impl EsBot {
                     }
                 };
             }
-            "stats" => {
-                let default_stats = if is_public_channel { "channel" } else { "user" };
+            "global" => {
+                match self.command_stats_global() {
+                    Ok(stats) => {
+                        self.send_message(&message.channel_id,
+                                          format!("**{}**\n{}", MESSAGE_STATS_GLOBAL, stats));
+                    }
+                    Err(_) => {
+                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                    }
+                }
+            }
+            "server" | "guild" => {
+                if !is_public_channel {
+                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+                    return;
+                }
 
-                match parts
-                          .next()
-                          .unwrap_or(default_stats)
-                          .to_lowercase()
-                          .as_str() {
-                    "global" => {
-                        match self.command_stats_global() {
-                            Ok(stats) => {
-                                self.send_message(&message.channel_id,
-                                                  format!("**{}**\n{}",
-                                                          MESSAGE_STATS_GLOBAL,
-                                                          stats));
+                if let Some(server_id) = self.public_channels.get(&message.channel_id) {
+                    match self.command_stats_server(server_id) {
+                        Ok(stats) => {
+                            self.send_message(&message.channel_id,
+                                              format!("**{}**\n{}", MESSAGE_STATS_SERVER, stats));
+                        }
+                        Err(_) => {
+                            self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                        }
+                    }
+                }
+            }
+            "channel" => {
+                if !is_public_channel {
+                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+                    return;
+                }
+
+                let mut channel_id = message.channel_id;
+
+                if let Some(channel_arg) = parts.next() {
+                    if channel_arg.len() > 3 && channel_arg.starts_with("<#") &&
+                       channel_arg.ends_with(">") {
+                        match channel_arg[2..(channel_arg.len() - 1)].parse::<u64>() {
+                            Ok(id) => {
+                                channel_id = ChannelId(id);
                             }
                             Err(_) => {
-                                self.send_message(&message.channel_id,
-                                                  MESSAGE_ERROR_OBTAINING_STATS);
-                            }
-                        }
-                    }
-                    "server" | "guild" => {
-                        if !is_public_channel {
-                            self.send_message(&message.channel_id,
-                                              MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
-                            return;
-                        }
-
-                        if let Some(server_id) = self.public_channels.get(&message.channel_id) {
-                            match self.command_stats_server(server_id) {
-                                Ok(stats) => {
-                                    self.send_message(&message.channel_id,
-                                                      format!("**{}**\n{}",
-                                                              MESSAGE_STATS_SERVER,
-                                                              stats));
-                                }
-                                Err(_) => {
-                                    self.send_message(&message.channel_id,
-                                                      MESSAGE_ERROR_OBTAINING_STATS);
-                                }
-                            }
-                        }
-                    }
-                    "channel" => {
-                        if !is_public_channel {
-                            self.send_message(&message.channel_id,
-                                              MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
-                            return;
-                        }
-
-                        let mut channel_id = message.channel_id;
-
-                        if let Some(channel_arg) = parts.next() {
-                            if channel_arg.len() > 3 && channel_arg.starts_with("<#") &&
-                               channel_arg.ends_with(">") {
-                                match channel_arg[2..(channel_arg.len() - 1)].parse::<u64>() {
-                                    Ok(id) => {
-                                        channel_id = ChannelId(id);
-                                    }
-                                    Err(_) => {
-                                        self.send_message(&message.channel_id,
-                                                          MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
-                                        return;
-                                    }
-                                }
-                            } else {
                                 self.send_message(&message.channel_id,
                                                   MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
                                 return;
                             }
                         }
+                    } else {
+                        self.send_message(&message.channel_id,
+                                          MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
+                        return;
+                    }
+                }
 
-                        match self.command_stats_channel(&channel_id) {
-                            Ok(stats) => {
-                                if channel_id == message.channel_id {
-                                    self.send_message(&message.channel_id,
-                                                      format!("**{}**\n{}",
-                                                              MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
-                                                              stats));
-                                } else {
-                                    self.send_message(&message.channel_id,
-                                                      format!("**{} <#{}>:**\n{}",
-                                                              MESSAGE_STATS_CHANNEL,
-                                                              channel_id.0,
-                                                              stats));
-                                }
-                            }
-                            Err(_) => {
-                                self.send_message(&message.channel_id,
-                                                  MESSAGE_ERROR_OBTAINING_STATS);
-                            }
+                match self.command_stats_channel(&channel_id) {
+                    Ok(stats) => {
+                        if channel_id == message.channel_id {
+                            self.send_message(&message.channel_id,
+                                              format!("**{}**\n{}",
+                                                      MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
+                                                      stats));
+                        } else {
+                            self.send_message(&message.channel_id,
+                                              format!("**{} <#{}>:**\n{}",
+                                                      MESSAGE_STATS_CHANNEL,
+                                                      channel_id.0,
+                                                      stats));
                         }
                     }
-                    "user" => {
-                        let mut user_id = message.author.id;
-                        let stats;
+                    Err(_) => {
+                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                    }
+                }
+            }
+            "user" => {
+                let mut user_id = message.author.id;
+                let stats;
 
-                        if is_public_channel {
-                            if let Some(user_arg) = parts.next() {
-                                debug!("Command: {}", command_str);
-                                debug!("Arg: {}", user_arg);
-                                if user_arg.len() > 4 && user_arg.starts_with("<@!") &&
-                                   user_arg.ends_with(">") {
-                                    match user_arg[3..(user_arg.len() - 1)].parse::<u64>() {
-                                        Ok(id) => {
-                                            user_id = UserId(id);
-                                        }
-                                        Err(_) => {
-                                            self.send_message(&message.channel_id,
-                                                              MESSAGE_STATS_USER_INVALID_USER);
-                                            return;
-                                        }
-                                    }
-                                } else {
+                if is_public_channel {
+                    if let Some(user_arg) = parts.next() {
+                        debug!("Command: {}", command_str);
+                        debug!("Arg: {}", user_arg);
+                        if user_arg.len() > 4 && user_arg.starts_with("<@!") &&
+                           user_arg.ends_with(">") {
+                            match user_arg[3..(user_arg.len() - 1)].parse::<u64>() {
+                                Ok(id) => {
+                                    user_id = UserId(id);
+                                }
+                                Err(_) => {
                                     self.send_message(&message.channel_id,
                                                       MESSAGE_STATS_USER_INVALID_USER);
                                     return;
                                 }
                             }
-
-                            let server_id = &self.public_channels.get(&message.channel_id).unwrap();
-                            stats =
-                                self.command_stats_user_favourite_emoji_for_server(&user_id,
-                                                                                   server_id);
                         } else {
-                            stats = self.command_stats_user_favourite_unicode_emoji(&user_id);
+                            self.send_message(&message.channel_id, MESSAGE_STATS_USER_INVALID_USER);
+                            return;
                         }
-
-                        match stats {
-                            Ok(stats) => {
-                                self.send_message(&message.channel_id,
-                                                  format!("**<@{}>{}**\n{}",
-                                                          user_id.0,
-                                                          if is_public_channel {
-                                                              MESSAGE_STATS_USER_FOR_SERVER
-                                                          } else {
-                                                              MESSAGE_STATS_USER_UNICODE
-                                                          },
-                                                          stats));
-                            }
-                            Err(_) => {
-                                self.send_message(&message.channel_id,
-                                                  MESSAGE_ERROR_OBTAINING_STATS);
-                            }
-                        }
-
                     }
-                    _ => {
-                        self.send_message(&message.channel_id, MESSAGE_HELP_STATS);
+
+                    let server_id = &self.public_channels.get(&message.channel_id).unwrap();
+                    stats = self.command_stats_user_favourite_emoji_for_server(&user_id, server_id);
+                } else {
+                    stats = self.command_stats_user_favourite_unicode_emoji(&user_id);
+                }
+
+                match stats {
+                    Ok(stats) => {
+                        self.send_message(&message.channel_id,
+                                          format!("**<@{}>{}**\n{}",
+                                                  user_id.0,
+                                                  if is_public_channel {
+                                                      MESSAGE_STATS_USER_FOR_SERVER
+                                                  } else {
+                                                      MESSAGE_STATS_USER_UNICODE
+                                                  },
+                                                  stats));
                     }
-                };
+                    Err(_) => {
+                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                    }
+                }
             }
             "quit" => {
                 if !self.control_users.contains(&message.author.id) {
