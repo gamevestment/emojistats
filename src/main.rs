@@ -11,6 +11,7 @@ use std::env::current_exe;
 use nix::unistd::execv;
 use std::ffi::CString;
 
+mod arg;
 mod esbot;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
