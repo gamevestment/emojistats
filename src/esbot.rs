@@ -1,6 +1,8 @@
 extern crate discord;
 extern crate postgres;
 
+use arg;
+
 use std::collections::HashMap;
 use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
                            PrivateChannel, PublicChannel, Message, MessageType, Emoji, EmojiId,
@@ -420,23 +422,7 @@ impl EsBot {
 
     fn process_message(&mut self, message: &Message) {
         // If the bot doesn't know about this channel for some reason, add it
-        if !self.private_channels.contains(&message.channel_id) &&
-           self.public_channels.get(&message.channel_id).is_none() {
-            match self.discord
-                      .as_ref()
-                      .unwrap()
-                      .get_channel(message.channel_id) {
-                Ok(channel) => {
-                    self.add_channel(&channel);
-                }
-                Err(reason) => {
-                    warn!("Received message from unknown channel {}",
-                          &message.channel_id);
-                    warn!("Failed to look up channel: {}", reason);
-                    return;
-                }
-            }
-        }
+        self.add_channel_id(&message.channel_id);
 
         if message.content.starts_with(&self.command_prefix) {
             let mut command_str = "";
@@ -1055,6 +1041,24 @@ impl EsBot {
                 self.add_public_channel(channel);
             }
             _ => {}
+        }
+    }
+
+    fn add_channel_id(&mut self, channel_id: &ChannelId) {
+        // If this channel ID is unknown
+        if !self.private_channels.contains(channel_id) &&
+           self.public_channels.get(channel_id).is_none() {
+            // Attempt to get the channel for this channel ID
+            match self.discord.as_ref().unwrap().get_channel(*channel_id) {
+                Ok(channel) => {
+                    self.add_channel(&channel);
+                }
+                Err(reason) => {
+                    warn!("Received message from unknown channel {}", channel_id);
+                    warn!("Failed to look up channel: {}", reason);
+                    return;
+                }
+            }
         }
     }
 
