@@ -5,7 +5,6 @@ authors = ["Jonathan Kim <jkim8192@gmail.com>"]
 license = "MIT"
 
 [dependencies]
-config = "0.4"
 dotenv = "0.10"
 log = "0.3"
 nix = "0.8.1"
