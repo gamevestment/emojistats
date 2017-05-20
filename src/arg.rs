@@ -19,7 +19,7 @@ impl<'a> fmt::Display for Type<'a> {
 // See: https://discordapp.com/developers/docs/resources/channel#message-formatting
 pub fn get_type(arg: &str) -> Type {
     if arg.ends_with(">") {
-        if arg.starts_with("<!@") {
+        if arg.starts_with("<@!") {
             match arg[3..(arg.len() - 1)].parse::<u64>() {
                 Ok(id) => {
                     return Type::UserId(discord::model::UserId(id));
@@ -83,13 +83,13 @@ mod tests {
     #[test]
     fn user_id() {
         assert_eq!(Some(discord::model::UserId(1)),
-                   match super::get_type("<!@1>") {
+                   match super::get_type("<@!1>") {
                        Type::UserId(id) => Some(id),
                        _ => None,
                    });
 
         assert_eq!(Some(discord::model::UserId(123)),
-                   match super::get_type("<!@123>") {
+                   match super::get_type("<@!123>") {
                        Type::UserId(id) => Some(id),
                        _ => None,
                    });
@@ -119,12 +119,12 @@ mod tests {
             _ => None,
         });
 
-        assert_eq!(Some("<!@>"), match super::get_type("<!@>") {
+        assert_eq!(Some("<@!>"), match super::get_type("<@!>") {
             Type::Text(text) => Some(text),
             _ => None,
         });
 
-        assert_eq!(Some("<!@.>"), match super::get_type("<!@.>") {
+        assert_eq!(Some("<@!.>"), match super::get_type("<@!.>") {
             Type::Text(text) => Some(text),
             _ => None,
         });
