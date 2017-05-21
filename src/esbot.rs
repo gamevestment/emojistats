@@ -1,5 +1,6 @@
 extern crate discord;
 extern crate postgres;
+extern crate time;
 
 use arg;
 
@@ -8,6 +9,7 @@ use self::discord::model::{Event, LiveServer, PossibleServer, ServerId, Channel,
                            ChannelId, PrivateChannel, PublicChannel, Message, MessageType, Emoji,
                            EmojiId, UserId};
 use self::discord::model::PossibleServer::Online;
+use self::time::{Timespec, Duration, get_time};
 
 const PG_CREATE_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS emoji (
@@ -291,6 +293,7 @@ const EMOJI_CROWN: &str = "\u{1F451}";
 const EMOJI_DISAPPOINTED: &str = "\u{1F61E}";
 const EMOJI_HEART: &str = "\u{2764}";
 const EMOJI_ROBOT: &str = "\u{1F916}";
+const EMOJI_TIMER: &str = "\u{23F2}";
 const EMOJI_QUITTING: &str = "\u{1F6D1}";
 const EMOJI_RESTARTING: &str = "\u{1F504}";
 
@@ -311,6 +314,8 @@ pub struct EsBot {
     unicode_emojis: HashMap<String, EmojiId>,
     control_users: Vec<UserId>,
     command_prefix: String,
+
+    online_since: Timespec,
 
     discord: Option<discord::Discord>,
     db_conn: Option<postgres::Connection>,
@@ -334,6 +339,8 @@ impl EsBot {
             unicode_emojis: HashMap::new(),
             control_users: Vec::new(),
             command_prefix: "".to_string(),
+
+            online_since: get_time(), // Will be overwritten when the bot connects
 
             discord: None,
             db_conn: None,
@@ -403,6 +410,8 @@ impl EsBot {
         self.discord = Some(discord);
         self.db_conn = Some(db_conn);
         self.add_unicode_emojis(unicode_emojis);
+
+        self.online_since = get_time();
 
         loop {
             match discord_conn.recv_event() {
@@ -840,13 +849,76 @@ impl EsBot {
         let num_channels = self.public_channels.len();
         let num_servers = self.servers.len();
 
+        let mut online_time = get_time() - self.online_since;
+
+        let mut online_time_desc = "I've been working for ".to_string();
+
+        let num_weeks = online_time.num_weeks();
+        online_time = online_time - Duration::weeks(num_weeks);
+        let num_days = online_time.num_days();
+        online_time = online_time - Duration::days(num_days);
+        let num_hours = online_time.num_hours();
+        online_time = online_time - Duration::hours(num_hours);
+        let num_minutes = online_time.num_minutes();
+        online_time = online_time - Duration::minutes(num_minutes);
+        let num_seconds = online_time.num_seconds();
+
+        // Are commas required? Is "and" required?
+        let mut num_parts = 1; // Start with seconds
+        if num_weeks > 0 {
+            num_parts += 1;
+        }
+        if num_days > 0 {
+            num_parts += 1;
+        }
+        if num_hours > 0 {
+            num_parts += 1;
+        }
+        if num_minutes > 0 {
+            num_parts += 1;
+        }
+        let comma_required = if num_parts > 2 { true } else { false };
+        let and_required = if num_parts > 1 { true } else { false };
+
+        if num_weeks > 0 {
+            online_time_desc += &format!("{} week{}{} ",
+                    num_weeks,
+                    if num_weeks == 1 { "" } else { "s" },
+                    if comma_required { "," } else { "" });
+        }
+        if num_days > 0 {
+            online_time_desc += &format!("{} day{}{} ",
+                    num_days,
+                    if num_days == 1 { "" } else { "s" },
+                    if comma_required { "," } else { "" });
+        }
+        if num_hours > 0 {
+            online_time_desc += &format!("{} hour{}{} ",
+                    num_hours,
+                    if num_hours == 1 { "" } else { "s" },
+                    if comma_required { "," } else { "" });
+        }
+        if num_minutes > 0 {
+            online_time_desc += &format!("{} minute{}{} ",
+                    num_minutes,
+                    if num_minutes == 1 { "" } else { "s" },
+                    if comma_required { "," } else { "" });
+        }
+
+        online_time_desc += &format!("{}{} second{}! {}",
+                if and_required { "and " } else { "" },
+                num_seconds,
+                if num_seconds == 1 { "" } else { "s" },
+                EMOJI_TIMER);
+
         self.send_message(response_channel_id,
-                          format!("I'm tracking emoji in {} channel{} on {} server{}. {}",
+                          format!("I'm tracking emoji in {} channel{} on {} server{}. {}\n{}",
                                   num_channels,
                                   if num_channels == 1 { "" } else { "s" },
                                   num_servers,
                                   if num_servers == 1 { "" } else { "s" },
-                                  EMOJI_CHART));
+                                  EMOJI_CHART,
+                                  online_time_desc));
     }
 
     fn command_quit(&mut self,
