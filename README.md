@@ -18,13 +18,15 @@ Alternatively, you may directly message the bot. When you send a direct message,
 
 ### General
 
-|        Command       |   Where you can use it  |                                   Description                                           |
-|----------------------|-------------------------|-----------------------------------------------------------------------------------------|
-|`about`               |Anywhere                 |See information about the bot                                                            |
-|`global`              |Anywhere                 |See the top used Unicode emoji globally                                                  |
-|`server`              |Public text channels only|See the top used emoji on this server                                                    |
-|`channel [<#channel>]`|Public text channels only|See the top used emoji on the specified channel (defaults to the current channel)        |
-|`user [<@user>]`      |Anywhere                 |See the specified user's favourite emoji (defaults to yourself)                          |
+|   Command  |   Where you can use it  |                  Description                  |
+|------------|-------------------------|-----------------------------------------------|
+|`about`     |Anywhere                 |See information about the bot                  |
+|`global`    |Anywhere                 |See the top used Unicode emoji globally        |
+|`server`    |Public text channels only|See the top used emoji on this server          |
+|`channel`   |Public text channels only|See the top used emoji on this channel         |
+|`<#channel>`|Public text channels only|See the top used emoji on the specified channel|
+|`me`        |Anywhere                 |See your favourite emoji                       |
+|`<@user>`   |Anywhere                 |See the specified user's favourite emoji       |
 
 ### Bot control
 

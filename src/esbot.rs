@@ -237,15 +237,13 @@ const MESSAGE_HELP: &str = "\
 **about**: See information about the bot
 **global**: See the top used Unicode emoji globally
 **server**: See the top used emoji on this server
-**channel [<#channel>]**: See the top used emoji on the specified channel \
-    (defaults to the current channel)
-**user [<@user>]**: See the specified user's favourite emoji (defaults to yourself)";
+**channel**: See the top used emoji on this channel
+**<#channel>**: See the top used emoji on the specified channel
+**me**: See your favourite emoji
+**<@user>**: See the specified user's favourite emoji";
 const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
 
-#[allow(unused)]
-const MESSAGE_COMMAND_NOT_IMPLEMENTED: &str = "\
-This command has not yet been implemented.";
 const MESSAGE_COMMAND_REQUIRES_AUTH: &str = "\
 Please authenticate first.";
 const MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL: &str = "\
@@ -253,27 +251,26 @@ This command may only be used in public chat channels.";
 const MESSAGE_COMMAND_UNKNOWN: &str = "\
 Unknown command";
 
+const MESSAGE_QUITTING: &str = "\
+Shutting down.";
+const MESSAGE_RESTARTING: &str = "\
+Restarting.";
+
 const MESSAGE_ABOUT: &str = "\
-**EmojiStats**
-A Discord bot that provides statistics on emoji usage. Built with discord-rs.
+I provide statistics on emoji usage!
+Made with :two_hearts: using Rust and discord-rs.
 https://github.com/quailiff/emojistats-bot";
 
 const MESSAGE_STATS_GLOBAL: &str = "\
-Top used Unicode emoji globally:";
+Top used Unicode emoji globally";
 const MESSAGE_STATS_SERVER: &str = "\
-Top used Unicode emoji on this server:";
+Top used emoji on this server";
 const MESSAGE_STATS_CHANNEL: &str = "\
 Top used emoji and emoji users in ";
-const MESSAGE_STATS_CHANNEL_INVALID_CHANNEL: &str = "\
-Please specify a valid #channel.";
-const MESSAGE_STATS_CHANNEL_THIS_CHANNEL: &str = "\
-Top used emoji and emoji users in this channel:";
 const MESSAGE_STATS_USER_FOR_SERVER: &str = "\
-'s favourite emoji on this server:";
-const MESSAGE_STATS_USER_INVALID_USER: &str = "\
-Please mention a valid @user.";
+'s favourite emoji on this server";
 const MESSAGE_STATS_USER_UNICODE: &str = "\
-'s favourite Unicode emoji:";
+'s favourite Unicode emoji";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 100;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 101;
@@ -375,6 +372,8 @@ impl EsBot {
         }
 
         // Let users invoke commands from public channels
+        // TODO: This will not work if the bot has a nickname; the message will
+        // begin with <!@ID> instead of <!ID>
         self.command_prefix = format!("<@{}>", ready_event.user.id.0);
         self.bot_user_id = ready_event.user.id;
 
@@ -424,12 +423,10 @@ impl EsBot {
         // If the bot doesn't know about this channel for some reason, add it
         self.add_channel_id(&message.channel_id);
 
+        // Check whether the message is a command
         if message.content.starts_with(&self.command_prefix) {
-            let mut command_str = "";
-            if message.content.len() > (self.command_prefix.len()) {
-                let (_, command_str_) = message.content.split_at(self.command_prefix.len() + 1);
-                command_str = command_str_;
-            }
+            // Remove the command prefix
+            let command_str = &message.content[self.command_prefix.len()..];
             self.process_command(message, command_str);
             return;
         }
@@ -452,210 +449,87 @@ impl EsBot {
                message.author.name,
                command_str);
 
-        let mut parts = command_str.split_whitespace();
-        let is_control_user = self.control_users.contains(&message.author.id);
-        let is_private_channel = self.private_channels.contains(&message.channel_id);
-        let is_public_channel = self.public_channels.contains_key(&message.channel_id);
-
-        match parts.next().unwrap_or("") {
-            "" => {
+        let mut command_parts = command_str.split_whitespace();
+        let command = match command_parts.next() {
+            Some(command) => command,
+            None => {
                 self.send_message(&message.channel_id, MESSAGE_HELP_HINT);
+                return;
             }
-            "help" => {
-                self.send_message(&message.channel_id, MESSAGE_HELP);
+        };
+
+        match arg::get_type(command) {
+            arg::Type::ChannelId(channel_id) => {
+                self.command_channel(&message.channel_id, &channel_id);
             }
-            "about" => {
-                self.send_message(&message.channel_id, MESSAGE_ABOUT);
+            arg::Type::UserId(user_id) => {
+                self.command_user(&message.channel_id, &user_id);
             }
-            "auth" | "authenticate" => {
-                if !is_private_channel {
-                    self.send_message(&message.channel_id, MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE);
-                    return;
-                }
-
-                if is_control_user {
-                    self.send_message(&message.channel_id, MESSAGE_AUTH_ALREADY_AUTHENTICATED);
-                    return;
-                }
-
-                match parts.next() {
-                    Some(try_password) => {
-                        if try_password == self.bot_control_password {
-                            debug!("Authentication successful for {}:\"{}\"",
-                                   message.author.id.0,
-                                   message.author.name);
-
-                            self.control_users.push(message.author.id);
-                            self.send_message(&message.channel_id, MESSAGE_AUTH_SUCCESS);
-                        } else {
-                            info!("Failed authentication attempt by {}:\"{}\" with password \"{}\"",
-                                  message.author.id.0,
-                                  message.author.name,
-                                  try_password);
-
-                            self.send_message(&message.channel_id, MESSAGE_AUTH_FAILURE);
-                        }
-                    }
-                    None => {
-                        self.send_message(&message.channel_id, MESSAGE_AUTH_MISSING_PASSWORD);
-                    }
-                };
+            arg::Type::CustomEmoji(custom_emoji_id) => {
+                self.command_custom_emoji(&message.channel_id, &custom_emoji_id);
             }
-            "global" => {
-                match self.command_stats_global() {
-                    Ok(stats) => {
-                        self.send_message(&message.channel_id,
-                                          format!("**{}**\n{}", MESSAGE_STATS_GLOBAL, stats));
+            arg::Type::Text(command) => {
+                match command {
+                    "help" => {
+                        self.send_message(&message.channel_id, MESSAGE_HELP);
                     }
-                    Err(_) => {
-                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                    "about" => {
+                        self.send_message(&message.channel_id, MESSAGE_ABOUT);
                     }
-                }
-            }
-            "server" | "guild" => {
-                if !is_public_channel {
-                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
-                    return;
-                }
-
-                if let Some(server_id) = self.public_channels.get(&message.channel_id) {
-                    match self.command_stats_server(server_id) {
-                        Ok(stats) => {
-                            self.send_message(&message.channel_id,
-                                              format!("**{}**\n{}", MESSAGE_STATS_SERVER, stats));
-                        }
-                        Err(_) => {
-                            self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
-                        }
+                    "auth" => {
+                        self.command_auth(&message.channel_id,
+                                          &message.author.id,
+                                          &message.author.name,
+                                          command_parts.next().unwrap_or(""));
                     }
-                }
-            }
-            "channel" => {
-                if !is_public_channel {
-                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
-                    return;
-                }
-
-                let mut channel_id = message.channel_id;
-
-                if let Some(channel_arg) = parts.next() {
-                    if channel_arg.len() > 3 && channel_arg.starts_with("<#") &&
-                       channel_arg.ends_with(">") {
-                        match channel_arg[2..(channel_arg.len() - 1)].parse::<u64>() {
-                            Ok(id) => {
-                                channel_id = ChannelId(id);
-                            }
-                            Err(_) => {
-                                self.send_message(&message.channel_id,
-                                                  MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
-                                return;
-                            }
-                        }
-                    } else {
-                        self.send_message(&message.channel_id,
-                                          MESSAGE_STATS_CHANNEL_INVALID_CHANNEL);
-                        return;
+                    "global" => {
+                        self.command_global(&message.channel_id);
                     }
-                }
-
-                match self.command_stats_channel(&channel_id) {
-                    Ok(stats) => {
-                        if channel_id == message.channel_id {
-                            self.send_message(&message.channel_id,
-                                              format!("**{}**\n{}",
-                                                      MESSAGE_STATS_CHANNEL_THIS_CHANNEL,
-                                                      stats));
-                        } else {
-                            self.send_message(&message.channel_id,
-                                              format!("**{} <#{}>:**\n{}",
-                                                      MESSAGE_STATS_CHANNEL,
-                                                      channel_id.0,
-                                                      stats));
-                        }
+                    "server" => {
+                        self.command_server(&message.channel_id);
                     }
-                    Err(_) => {
-                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                    "channel" => {
+                        self.command_channel(&message.channel_id, &message.channel_id);
                     }
-                }
-            }
-            "user" => {
-                let mut user_id = message.author.id;
-                let stats;
-
-                if is_public_channel {
-                    if let Some(user_arg) = parts.next() {
-                        debug!("Command: {}", command_str);
-                        debug!("Arg: {}", user_arg);
-                        if user_arg.len() > 4 && user_arg.starts_with("<@!") &&
-                           user_arg.ends_with(">") {
-                            match user_arg[3..(user_arg.len() - 1)].parse::<u64>() {
-                                Ok(id) => {
-                                    user_id = UserId(id);
-                                }
-                                Err(_) => {
-                                    self.send_message(&message.channel_id,
-                                                      MESSAGE_STATS_USER_INVALID_USER);
-                                    return;
-                                }
-                            }
-                        } else {
-                            self.send_message(&message.channel_id, MESSAGE_STATS_USER_INVALID_USER);
+                    "me" => {
+                        self.command_user(&message.channel_id, &message.author.id);
+                    }
+                    "quit" => {
+                        if !self.control_users.contains(&message.author.id) {
+                            self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
                             return;
                         }
+
+                        self.send_message(&message.channel_id, MESSAGE_QUITTING);
+
+                        info!("Quitting per {}:\"{}\"",
+                              &message.author.id.0,
+                              &message.author.name);
+                        self.quit = true;
                     }
+                    "restart" => {
+                        if !self.control_users.contains(&message.author.id) {
+                            self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
+                            return;
+                        }
 
-                    let server_id = &self.public_channels.get(&message.channel_id).unwrap();
-                    stats = self.command_stats_user_favourite_emoji_for_server(&user_id, server_id);
-                } else {
-                    stats = self.command_stats_user_favourite_unicode_emoji(&user_id);
-                }
+                        self.send_message(&message.channel_id, MESSAGE_RESTARTING);
 
-                match stats {
-                    Ok(stats) => {
+                        info!("Restarting per {}:\"{}\"",
+                              &message.author.id.0,
+                              &message.author.name);
+                        self.quit = true;
+                        self.restart = true;
+                    }
+                    unknown_command => {
+                        // TODO: Test whether this is a Unicode emoji
                         self.send_message(&message.channel_id,
-                                          format!("**<@{}>{}**\n{}",
-                                                  user_id.0,
-                                                  if is_public_channel {
-                                                      MESSAGE_STATS_USER_FOR_SERVER
-                                                  } else {
-                                                      MESSAGE_STATS_USER_UNICODE
-                                                  },
-                                                  stats));
-                    }
-                    Err(_) => {
-                        self.send_message(&message.channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                                          format!("{} `{}`. {}",
+                                                  MESSAGE_COMMAND_UNKNOWN,
+                                                  unknown_command,
+                                                  MESSAGE_HELP_HINT));
                     }
                 }
-            }
-            "quit" => {
-                if !self.control_users.contains(&message.author.id) {
-                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
-                    return;
-                }
-
-                info!("Quitting per {}:\"{}\"",
-                      &message.author.id.0,
-                      &message.author.name);
-                self.quit = true;
-            }
-            "restart" => {
-                if !self.control_users.contains(&message.author.id) {
-                    self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
-                    return;
-                }
-
-                info!("Restarting per {}:\"{}\"",
-                      &message.author.id.0,
-                      &message.author.name);
-                self.quit = true;
-                self.restart = true;
-            }
-            unknown_command => {
-                self.send_message(&message.channel_id,
-                                  format!("{} `{}`. {}",
-                                          MESSAGE_COMMAND_UNKNOWN,
-                                          unknown_command,
-                                          MESSAGE_HELP_HINT));
             }
         }
     }
@@ -725,6 +599,131 @@ impl EsBot {
             insert_message.execute(&[&message_id, &channel_id, &user_id, &total_emoji_count]) {
             error!("Error inserting message: {}", reason);
         }
+    }
+
+    fn command_auth(&mut self,
+                    response_channel_id: &ChannelId,
+                    user_id: &UserId,
+                    user_name: &str,
+                    try_password: &str) {
+        if !self.private_channels.contains(response_channel_id) {
+            self.send_message(response_channel_id, MESSAGE_AUTH_REQUIRES_DIRECT_MESSAGE);
+            return;
+        }
+
+        if self.control_users.contains(user_id) {
+            self.send_message(response_channel_id, MESSAGE_AUTH_ALREADY_AUTHENTICATED);
+            return;
+        }
+
+        if try_password == self.bot_control_password {
+            debug!("Authentication successful for {}:\"{}\"",
+                   user_id,
+                   user_name);
+
+            self.control_users.push(*user_id);
+
+            self.send_message(response_channel_id, MESSAGE_AUTH_SUCCESS);
+        } else if try_password.len() == 0 {
+            self.send_message(response_channel_id, MESSAGE_AUTH_MISSING_PASSWORD);
+        } else {
+            info!("Failed authentication attempt by {}:\"{}\" with password \"{}\"",
+                  user_id,
+                  user_name,
+                  try_password);
+
+            self.send_message(response_channel_id, MESSAGE_AUTH_FAILURE);
+        }
+    }
+
+    fn command_global(&self, response_channel_id: &ChannelId) {
+        match self.command_stats_global() {
+            Ok(stats) => {
+                self.send_message(response_channel_id,
+                                  format!("**{} \u{1F4C8}**\n{}", MESSAGE_STATS_GLOBAL, stats));
+            }
+            Err(_) => {
+                self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+            }
+        }
+    }
+
+    fn command_server(&self, response_channel_id: &ChannelId) {
+        if let Some(server_id) = self.public_channels.get(response_channel_id) {
+            match self.command_stats_server(server_id) {
+                Ok(stats) => {
+                    self.send_message(response_channel_id,
+                                      format!("**{} \u{1F4C8}**\n{}", MESSAGE_STATS_SERVER, stats));
+                }
+                Err(_) => {
+                    self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                }
+            }
+        } else {
+            self.send_message(response_channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+            return;
+        }
+    }
+
+    fn command_channel(&self, response_channel_id: &ChannelId, channel_id: &ChannelId) {
+        if !self.public_channels.contains_key(channel_id) {
+            self.send_message(response_channel_id, MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL);
+            return;
+        }
+
+        match self.command_stats_channel(channel_id) {
+            Ok(stats) => {
+                self.send_message(response_channel_id,
+                                  format!("**{} <#{}> \u{1F4C8}**\n{}",
+                                          MESSAGE_STATS_CHANNEL,
+                                          channel_id.0,
+                                          stats));
+            }
+            Err(_) => {
+                self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+            }
+        }
+    }
+
+    fn command_user(&self, response_channel_id: &ChannelId, user_id: &UserId) {
+        let (is_public_channel, stats) =
+            if let Some(server_id) = self.public_channels.get(response_channel_id) {
+                (true, self.command_stats_user_favourite_emoji_for_server(user_id, &server_id))
+            } else if self.private_channels.contains(response_channel_id) {
+                (false, self.command_stats_user_favourite_unicode_emoji(user_id))
+            } else {
+                (false, Err(()))
+            };
+
+        match stats {
+            Ok(stats) => {
+                self.send_message(response_channel_id,
+                                  format!("**<@{}>{} \u{2764}**\n{}",
+                                          user_id.0,
+                                          if is_public_channel {
+                                              MESSAGE_STATS_USER_FOR_SERVER
+                                          } else {
+                                              MESSAGE_STATS_USER_UNICODE
+                                          },
+                                          stats));
+            }
+            Err(_) => {
+                self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+            }
+        }
+    }
+
+    fn command_custom_emoji(&self, response_channel_id: &ChannelId, custom_emoji_id: &EmojiId) {
+        self.command_emoji_id(response_channel_id, custom_emoji_id.0);
+    }
+
+    fn command_emoji(&self, response_channel_id: &ChannelId, emoji: &str) {
+        self.command_emoji_id(response_channel_id, 1);
+    }
+
+    fn command_emoji_id(&self, response_channel_id: &ChannelId, emoji_id: u64) {
+        // TODO: command_emoji_id
+        self.send_message(response_channel_id, format!("Stats for emoji {}", emoji_id));
     }
 
     fn command_stats_global(&self) -> Result<String, ()> {
@@ -1001,13 +1000,11 @@ impl EsBot {
                     stats = "This user has not used any Unicode emoji.".to_string();
                 } else {
                     for row in &rows {
-                        let emoji_id = row.get::<usize, i64>(0) as u64;
                         let emoji_name = row.get::<usize, String>(1);
                         let use_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("<:{}:{}> was used {} time{}\n",
+                        stats += &format!("{} was used {} time{}\n",
                                 emoji_name,
-                                emoji_id,
                                 use_count,
                                 if use_count == 1 { "" } else { "s" });
                     }
