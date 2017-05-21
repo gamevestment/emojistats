@@ -4,9 +4,9 @@ extern crate postgres;
 use arg;
 
 use std::collections::HashMap;
-use self::discord::model::{Event, LiveServer, ServerId, Channel, ChannelType, ChannelId,
-                           PrivateChannel, PublicChannel, Message, MessageType, Emoji, EmojiId,
-                           UserId};
+use self::discord::model::{Event, LiveServer, PossibleServer, ServerId, Channel, ChannelType,
+                           ChannelId, PrivateChannel, PublicChannel, Message, MessageType, Emoji,
+                           EmojiId, UserId};
 use self::discord::model::PossibleServer::Online;
 
 const PG_CREATE_TABLES: &str = "
@@ -380,8 +380,8 @@ impl EsBot {
         };
 
         // Add servers and channels
-        for server in &ready_event.servers {
-            match *server {
+        for possible_server in &ready_event.servers {
+            match *possible_server {
                 Online(ref server) => {
                     self.add_server(server);
                 }
@@ -409,14 +409,30 @@ impl EsBot {
                 Ok(Event::ServerCreate(Online(server))) => {
                     self.add_server(&server);
                 }
-                Ok(Event::ChannelCreate(channel)) => {
-                    self.add_channel(&channel);
-                }
-                Ok(Event::ChannelUpdate(channel)) => {
-                    self.add_channel(&channel);
+                Ok(Event::ServerDelete(possible_server)) => {
+                    match possible_server {
+                        PossibleServer::Online(ref server) => {
+                            self.delete_server_id(&server.id);
+                        }
+                        PossibleServer::Offline(server_id) => {
+                            self.delete_server_id(&server_id);
+                        }
+                    }
                 }
                 Ok(Event::ServerEmojisUpdate(server_id, custom_emojis)) => {
                     self.add_custom_emojis(&server_id, &custom_emojis);
+                }
+                Ok(Event::ServerUpdate(server)) => {
+                    self.add_custom_emojis(&server.id, &server.emojis);
+                }
+                Ok(Event::ChannelCreate(channel)) => {
+                    self.add_channel(&channel);
+                }
+                Ok(Event::ChannelDelete(channel)) => {
+                    self.delete_channel(&channel);
+                }
+                Ok(Event::ChannelUpdate(channel)) => {
+                    self.add_channel(&channel);
                 }
                 Ok(Event::MessageCreate(message)) => {
                     // Process messages sent by people; ignore messages sent by bots
@@ -1310,6 +1326,24 @@ impl EsBot {
         self.add_custom_emojis(&server.id, &server.emojis);
     }
 
+    fn delete_server_id(&mut self, server_id: &ServerId) {
+        debug!("Deleting server: {}", server_id);
+
+        self.servers.remove(&server_id);
+
+        // See: http://stackoverflow.com/a/28913638
+        let channels_to_delete: Vec<ChannelId> = self.public_channels
+                .iter()
+                // Filter entries where the server id is the same
+                .filter(|&(_, &channel_server_id)| channel_server_id == *server_id)
+                // Create a new vector containing the channel IDs
+                .map(|(channel_id, _)| channel_id.clone())
+                .collect();
+        for channel_id in &channels_to_delete {
+            self.public_channels.remove(channel_id);
+        }
+    }
+
     fn add_channel(&mut self, channel: &Channel) {
         match *channel {
             Channel::Private(ref channel) => {
@@ -1370,6 +1404,17 @@ impl EsBot {
             }
 
             self.public_channels.insert(channel.id, channel.server_id);
+        }
+    }
+
+    fn delete_channel(&mut self, channel: &Channel) {
+        match *channel {
+            Channel::Public(ref channel) => {
+                debug!("Deleting public channel \"{}\"", &channel.name);
+                self.public_channels.remove(&channel.id);
+            }
+            // Private channels and groups don't matter
+            _ => {}
         }
     }
 
