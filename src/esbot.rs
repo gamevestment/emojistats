@@ -264,7 +264,7 @@ OFFSET
 const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
 An error occurred while obtaining the statistics. \u{1F625}";
 const MESSAGE_HELP: &str = "\
-**Commands:**
+**\u{26A1} Commands**
 **about:** See information about the bot
 **global:** See the top used Unicode emoji globally
 **server:** See the top used emoji on this server
@@ -277,19 +277,20 @@ const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
 
 const MESSAGE_COMMAND_REQUIRES_AUTH: &str = "\
-Please authenticate first.";
+\u{26D4} Please authenticate first.";
 const MESSAGE_COMMAND_REQUIRES_PUBLIC_CHANNEL: &str = "\
-This command may only be used in public chat channels.";
+\u{1F6AB} This command may only be used in public chat channels.";
 
 const MESSAGE_ABOUT: &str = "\
-I provide statistics on emoji usage!
-Made with :two_hearts: using Rust and discord-rs.
-https://github.com/quailiff/emojistats-bot";
+I provide statistics on emoji usage! \u{1F4C8}
+Made with \u{1F495} using Rust and discord-rs.
+\u{1F310} https://github.com/quailiff/emojistats-bot";
 
 const EMOJI_CHART: &str = "\u{1F4C8}";
-const EMOJI_HEART: &str = "\u{2764}";
 const EMOJI_CROWN: &str = "\u{1F451}";
 const EMOJI_DISAPPOINTED: &str = "\u{1F61E}";
+const EMOJI_HEART: &str = "\u{2764}";
+const EMOJI_ROBOT: &str = "\u{1F916}";
 const EMOJI_QUITTING: &str = "\u{1F6D1}";
 const EMOJI_RESTARTING: &str = "\u{1F504}";
 
@@ -474,7 +475,8 @@ impl EsBot {
         let command = match command_parts.next() {
             Some(command) => command,
             None => {
-                self.send_message(&message.channel_id, MESSAGE_HELP_HINT);
+                self.send_message(&message.channel_id,
+                                  format!("{} {}", EMOJI_ROBOT, MESSAGE_HELP_HINT));
                 return;
             }
         };
@@ -535,7 +537,8 @@ impl EsBot {
                         }
 
                         self.send_message(&message.channel_id,
-                                          format!("Unknown command `{}`. {}",
+                                          format!("{} Unknown command `{}`. {}",
+                                                  EMOJI_ROBOT,
                                                   other,
                                                   MESSAGE_HELP_HINT));
                     }
@@ -620,12 +623,14 @@ impl EsBot {
                     try_password: &str) {
         if !self.private_channels.contains(response_channel_id) {
             self.send_message(response_channel_id,
-                              "Please send me a direct message to authenticate.");
+                              format!("{} Please send me a direct message to authenticate.",
+                                      EMOJI_ROBOT));
             return;
         }
 
         if self.control_users.contains(user_id) {
-            self.send_message(response_channel_id, "You have already authenticated.");
+            self.send_message(response_channel_id,
+                              format!("{} You have already authenticated.", EMOJI_ROBOT));
             return;
         }
 
@@ -636,7 +641,7 @@ impl EsBot {
 
             self.control_users.push(*user_id);
 
-            self.send_message(response_channel_id, "Authentication successful.");
+            self.send_message(response_channel_id, "\u{2705} Authentication successful.");
         } else if try_password.len() == 0 {
             self.send_message(response_channel_id, "Please enter a password.");
         } else {
@@ -645,17 +650,14 @@ impl EsBot {
                   user_name,
                   try_password);
 
-            self.send_message(response_channel_id, "Authentication unsuccessful.");
+            self.send_message(response_channel_id, "\u{26D4} Authentication unsuccessful.");
         }
     }
 
     fn command_global(&self, response_channel_id: &ChannelId) {
         match self.command_stats_global() {
             Ok(stats) => {
-                self.send_message(response_channel_id,
-                                  format!("**Top Unicode emoji used globally {}**\n{}",
-                                          EMOJI_CHART,
-                                          stats));
+                self.send_message(response_channel_id, stats);
             }
             Err(_) => {
                 self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
@@ -667,10 +669,7 @@ impl EsBot {
         if let Some(server_id) = self.public_channels.get(response_channel_id) {
             match self.command_stats_server(server_id) {
                 Ok(stats) => {
-                    self.send_message(response_channel_id,
-                                      format!("**Top emoji used on this server {}**\n{}",
-                                              EMOJI_CHART,
-                                              stats));
+                    self.send_message(response_channel_id, stats);
                 }
                 Err(_) => {
                     self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
@@ -690,11 +689,7 @@ impl EsBot {
 
         match self.command_stats_channel(channel_id) {
             Ok(stats) => {
-                self.send_message(response_channel_id,
-                                  format!("**Top used emoji and emoji users in <#{}> {}**\n{}",
-                                          channel_id.0,
-                                          EMOJI_CHART,
-                                          stats));
+                self.send_message(response_channel_id, stats);
             }
             Err(_) => {
                 self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
@@ -847,7 +842,7 @@ impl EsBot {
             return;
         }
 
-        self.send_message(response_channel_id, format!("Quitting {}", EMOJI_QUITTING));
+        self.send_message(response_channel_id, format!("{} Quitting.", EMOJI_QUITTING));
 
         info!("Quitting per <@{}> = \"{}\"", user_id.0, user_name);
         self.quit = true;
@@ -863,7 +858,7 @@ impl EsBot {
         }
 
         self.send_message(response_channel_id,
-                          format!("Restarting {}", EMOJI_RESTARTING));
+                          format!("{} Restarting.", EMOJI_RESTARTING));
 
         info!("Restarting per <@{}> = \"{}\"", user_id.0, user_name);
         self.restart = true;
@@ -879,18 +874,18 @@ impl EsBot {
             }
         };
 
-        let mut stats = "".to_string();
+        let mut stats = format!("**Top Unicode emoji used globally {}**", EMOJI_CHART);
 
         match stats_global.query(&[]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "No Unicode emoji have been used.".to_string();
+                    stats = format!("No Unicode emoji have been used. {}", EMOJI_DISAPPOINTED);
                 } else {
                     for row in &rows {
                         let emoji_name = row.get::<usize, String>(0);
                         let use_count = row.get::<usize, i64>(1);
 
-                        stats += &format!("{} was used {} time{}\n",
+                        stats += &format!("\n{} was used {} time{}",
                                 emoji_name,
                                 use_count,
                                 if use_count == 1 { "" } else { "s" });
@@ -925,14 +920,15 @@ impl EsBot {
                 }
             };
 
-        let mut stats = "".to_string();
+        let mut stats = format!("**Top emoji used on this server {}**", EMOJI_CHART);
 
         let server_id = &(server_id.0 as i64);
 
         match select_stats_server_top_emoji.query(&[server_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "No emoji have been used on this server.".to_string();
+                    stats = format!("No emoji have been used on this server. {}",
+                                    EMOJI_DISAPPOINTED);
                 } else {
                     for row in &rows {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
@@ -941,13 +937,13 @@ impl EsBot {
                         let is_custom_emoji = row.get::<usize, bool>(3);
 
                         if is_custom_emoji {
-                            stats += &format!("<:{}:{}> was used {} time{}\n",
+                            stats += &format!("\n<:{}:{}> was used {} time{}",
                                     emoji_name,
                                     emoji_id,
                                     use_count,
                                     if use_count == 1 { "" } else { "s" });
                         } else {
-                            stats += &format!("{} was used {} time{}\n",
+                            stats += &format!("\n{} was used {} time{}",
                                     emoji_name,
                                     use_count,
                                     if use_count == 1 { "" } else { "s" });
@@ -971,7 +967,7 @@ impl EsBot {
                         let use_count = row.get::<usize, i64>(1);
                         let message_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("<@{}> has used {} emoji in {} message{} ",
+                        stats += &format!("\n<@{}> has used {} emoji in {} message{} ",
                                 user_id,
                                 use_count,
                                 message_count,
@@ -981,8 +977,6 @@ impl EsBot {
                             stats += EMOJI_CROWN;
                             first_row = false;
                         }
-
-                        stats += "\n";
                     }
                 }
             }
@@ -1014,14 +1008,18 @@ impl EsBot {
                 }
             };
 
-        let mut stats = "".to_string();
+        let mut stats = format!("**Top used emoji and emoji users in <#{}> {}**",
+                                channel_id.0,
+                                EMOJI_CHART);
 
         let channel_id = &(channel_id.0 as i64);
 
         match select_stats_channel_top_emoji.query(&[channel_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "No emoji have been used in this channel.".to_string();
+                    stats = format!("No emoji have been used in <#{}>. {}",
+                                    channel_id,
+                                    EMOJI_DISAPPOINTED);
                 } else {
                     for row in &rows {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
@@ -1030,13 +1028,13 @@ impl EsBot {
                         let is_custom_emoji = row.get::<usize, bool>(3);
 
                         if is_custom_emoji {
-                            stats += &format!("<:{}:{}> was used {} time{}\n",
+                            stats += &format!("\n<:{}:{}> was used {} time{}",
                                     emoji_name,
                                     emoji_id,
                                     use_count,
                                     if use_count == 1 { "" } else { "s" });
                         } else {
-                            stats += &format!("{} was used {} time{}\n",
+                            stats += &format!("\n{} was used {} time{}",
                                     emoji_name,
                                     use_count,
                                     if use_count == 1 { "" } else { "s" });
@@ -1060,7 +1058,7 @@ impl EsBot {
                         let use_count = row.get::<usize, i64>(1);
                         let message_count = row.get::<usize, i64>(2);
 
-                        stats += &format!("<@{}> has used {} emoji in {} message{} ",
+                        stats += &format!("\n<@{}> has used {} emoji in {} message{} ",
                                 user_id,
                                 use_count,
                                 message_count,
@@ -1070,8 +1068,6 @@ impl EsBot {
                             stats += EMOJI_CROWN;
                             first_record = false;
                         }
-
-                        stats += "\n";
                     }
                 }
             }
@@ -1106,7 +1102,7 @@ impl EsBot {
         match stats_user_favourite_emoji_for_server.query(&[user_id, server_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "This user has not used any emoji.".to_string();
+                    stats = format!("This user has not used any emoji. {}", EMOJI_DISAPPOINTED);
                 } else {
                     for row in &rows {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
@@ -1158,7 +1154,8 @@ impl EsBot {
         match select_stats_user_favourite_unicode_emoji.query(&[user_id]) {
             Ok(rows) => {
                 if rows.len() == 0 {
-                    stats = "This user has not used any Unicode emoji.".to_string();
+                    stats = format!("This user has not used any Unicode emoji. {}",
+                                    EMOJI_DISAPPOINTED);
                 } else {
                     for row in &rows {
                         let emoji_name = row.get::<usize, String>(1);
