@@ -218,18 +218,61 @@ LIMIT
     5
 OFFSET
     0";
+const PG_SELECT_STATS_EMOJI_TIMES_USED_GLOBALLY: &str = "
+SELECT
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+WHERE
+    eu.emoji_id = $1
+GROUP BY
+    eu.emoji_id";
+const PG_SELECT_STATS_EMOJI_TIMES_USED_ON_SERVER: &str = "
+SELECT
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+    INNER JOIN public_channel pc ON eu.public_channel_id = pc.id
+WHERE
+    eu.emoji_id = $1 AND
+    pc.guild_id = $2
+GROUP BY
+    eu.emoji_id";
+const PG_SELECT_STATS_EMOJI_TOP_USERS_ON_SERVER: &str = "
+SELECT
+    eu.user_id,
+    SUM(eu.use_count)
+FROM
+    emoji_usage eu
+    INNER JOIN emoji e ON eu.emoji_id = e.id
+    INNER JOIN public_channel pc ON eu.public_channel_id = pc.id
+WHERE
+    eu.emoji_id = $1 AND
+    pc.guild_id = $2
+GROUP BY
+    eu.user_id,
+    eu.emoji_id
+ORDER BY
+    SUM(eu.use_count) DESC
+LIMIT
+    5
+OFFSET
+    0";
 
 const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
-An error occurred while obtaining the statistics.";
+An error occurred while obtaining the statistics. \u{1F625}";
 const MESSAGE_HELP: &str = "\
 **Commands:**
-**about**: See information about the bot
-**global**: See the top used Unicode emoji globally
-**server**: See the top used emoji on this server
-**channel**: See the top used emoji on this channel
-**<#channel>**: See the top used emoji on the specified channel
-**me**: See your favourite emoji
-**<@user>**: See the specified user's favourite emoji";
+**about:** See information about the bot
+**global:** See the top used Unicode emoji globally
+**server:** See the top used emoji on this server
+**channel:** See the top used emoji on this channel
+**<#channel>:** See the top used emoji on the specified channel
+**me:** See your favourite emoji
+**<@user>:** See the specified user's favourite emoji
+**<emoji>:** See usage information for that emoji";
 const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
 
@@ -246,6 +289,9 @@ https://github.com/quailiff/emojistats-bot";
 const EMOJI_CHART: &str = "\u{1F4C8}";
 const EMOJI_HEART: &str = "\u{2764}";
 const EMOJI_CROWN: &str = "\u{1F451}";
+const EMOJI_DISAPPOINTED: &str = "\u{1F61E}";
+const EMOJI_QUITTING: &str = "\u{1F6D1}";
+const EMOJI_RESTARTING: &str = "\u{1F504}";
 
 const EXIT_STATUS_DB_COULDNT_CONNECT: i32 = 100;
 const EXIT_STATUS_DB_COULDNT_CREATE_TABLES: i32 = 101;
@@ -261,7 +307,7 @@ pub struct EsBot {
     servers: HashMap<ServerId, HashMap<EmojiId, String>>,
     private_channels: Vec<ChannelId>,
     public_channels: HashMap<ChannelId, ServerId>,
-    unicode_emojis: HashMap<(String, String), EmojiId>,
+    unicode_emojis: HashMap<String, EmojiId>,
     control_users: Vec<UserId>,
     command_prefix: String,
 
@@ -482,11 +528,15 @@ impl EsBot {
                                              &message.author.id,
                                              &message.author.name);
                     }
-                    unknown_command => {
-                        // TODO: Test whether this is a Unicode emoji
+                    other => {
+                        if self.unicode_emojis.contains_key(other) {
+                            self.command_unicode_emoji(&message.channel_id, other);
+                            return;
+                        }
+
                         self.send_message(&message.channel_id,
                                           format!("Unknown command `{}`. {}",
-                                                  unknown_command,
+                                                  other,
                                                   MESSAGE_HELP_HINT));
                     }
                 }
@@ -538,9 +588,7 @@ impl EsBot {
             }
         }
 
-        for (unicode_emoji_pair, unicode_emoji_id) in &self.unicode_emojis {
-            let unicode_emoji = &unicode_emoji_pair.0;
-
+        for (unicode_emoji, unicode_emoji_id) in &self.unicode_emojis {
             let count = message.content.matches(unicode_emoji).count() as i32;
 
             if count > 0 {
@@ -683,17 +731,98 @@ impl EsBot {
         }
     }
 
-    fn command_custom_emoji(&self, response_channel_id: &ChannelId, custom_emoji_id: &EmojiId) {
-        self.command_emoji_id(response_channel_id, custom_emoji_id.0);
+    fn command_custom_emoji(&self, response_channel_id: &ChannelId, emoji_id: &EmojiId) {
+        if let Some(server_id) = self.public_channels.get(response_channel_id) {
+            if let Some(server_emojis) = self.servers.get(server_id) {
+                if let Some(custom_emoji) = server_emojis.get(emoji_id) {
+                    if let Ok(times_used) = self.command_stats_emoji_times_used_globally(emoji_id) {
+                        if times_used == 0 {
+                            self.send_message(response_channel_id,
+                                              format!("{} has never been used. {}",
+                                                      custom_emoji,
+                                                      EMOJI_DISAPPOINTED));
+                            return;
+                        } else if let Ok(top_user_stats) =
+                            self.command_stats_emoji_top_users_on_server(emoji_id, server_id) {
+                            self.send_message(response_channel_id,
+                                              format!("**{} Stats for {}**\n\
+                                                      Used {} time{}\n\
+                                                      {}",
+                                                      EMOJI_CHART,
+                                                      custom_emoji,
+                                                      times_used,
+                                                      if times_used == 1 { "" } else { "s" },
+                                                      top_user_stats));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
     }
 
-    fn command_emoji(&self, response_channel_id: &ChannelId, emoji: &str) {
-        self.command_emoji_id(response_channel_id, 1);
-    }
+    fn command_unicode_emoji(&self, response_channel_id: &ChannelId, emoji: &str) {
+        let emoji_id = match self.unicode_emojis.get(emoji) {
+            Some(emoji_id) => emoji_id,
+            None => {
+                self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                return;
+            }
+        };
 
-    fn command_emoji_id(&self, response_channel_id: &ChannelId, emoji_id: u64) {
-        // TODO: command_emoji_id
-        self.send_message(response_channel_id, format!("Stats for emoji {}", emoji_id));
+        let times_used_globally = match self.command_stats_emoji_times_used_globally(emoji_id) {
+            Ok(times_used_globally) => times_used_globally,
+            Err(_) => {
+                self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                return;
+            }
+        };
+
+        let mut stats;
+
+        if times_used_globally == 0 {
+            stats = format!("{} has never been used. {}", emoji, EMOJI_DISAPPOINTED);
+        } else {
+            stats = format!("**{} Stats for {}**\n\
+                            Used {} time{} globally",
+                            EMOJI_CHART,
+                            emoji,
+                            times_used_globally,
+                            if times_used_globally == 1 { "" } else { "s" });
+
+            // If the command was invoked on a server, get usage statistics for
+            // that server
+            if let Some(server_id) = self.public_channels.get(response_channel_id) {
+                match self.command_stats_emoji_times_used_on_server(emoji_id, server_id) {
+                    Ok(times_used_on_server) => {
+                        if times_used_on_server == 0 {
+                            stats += &format!("\nNever used on this server. {}",
+                                    EMOJI_DISAPPOINTED);
+                        } else {
+                            match self.command_stats_emoji_top_users_on_server(emoji_id,
+                                                                               server_id) {
+                                Ok(server_stats) => {
+                                    stats += &format!("\n{}", server_stats);
+                                }
+                                Err(_) => {
+                                    self.send_message(response_channel_id,
+                                                      MESSAGE_ERROR_OBTAINING_STATS);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        self.send_message(response_channel_id, MESSAGE_ERROR_OBTAINING_STATS);
+                        return;
+                    }
+                }
+            }
+        }
+
+        self.send_message(response_channel_id, stats);
     }
 
     fn command_meta(&mut self, response_channel_id: &ChannelId) {
@@ -718,7 +847,7 @@ impl EsBot {
             return;
         }
 
-        self.send_message(response_channel_id, "Quitting.");
+        self.send_message(response_channel_id, format!("Quitting {}", EMOJI_QUITTING));
 
         info!("Quitting per <@{}> = \"{}\"", user_id.0, user_name);
         self.quit = true;
@@ -733,7 +862,8 @@ impl EsBot {
             return;
         }
 
-        self.send_message(response_channel_id, "Restarting.");
+        self.send_message(response_channel_id,
+                          format!("Restarting {}", EMOJI_RESTARTING));
 
         info!("Restarting per <@{}> = \"{}\"", user_id.0, user_name);
         self.restart = true;
@@ -749,7 +879,7 @@ impl EsBot {
             }
         };
 
-        let mut stats: String = "".to_string();
+        let mut stats = "".to_string();
 
         match stats_global.query(&[]) {
             Ok(rows) => {
@@ -795,7 +925,7 @@ impl EsBot {
                 }
             };
 
-        let mut stats: String = "".to_string();
+        let mut stats = "".to_string();
 
         let server_id = &(server_id.0 as i64);
 
@@ -884,7 +1014,7 @@ impl EsBot {
                 }
             };
 
-        let mut stats: String = "".to_string();
+        let mut stats = "".to_string();
 
         let channel_id = &(channel_id.0 as i64);
 
@@ -968,7 +1098,7 @@ impl EsBot {
                 }
             };
 
-        let mut stats: String = "".to_string();
+        let mut stats = "".to_string();
 
         let user_id = &(user_id.0 as i64);
         let server_id = &(server_id.0 as i64);
@@ -1021,7 +1151,7 @@ impl EsBot {
                 }
             };
 
-        let mut stats: String = "".to_string();
+        let mut stats = "".to_string();
 
         let user_id = &(user_id.0 as i64);
 
@@ -1043,6 +1173,129 @@ impl EsBot {
             }
             Err(reason) => {
                 error!("Error selecting user stats: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(stats)
+    }
+
+    fn command_stats_emoji_times_used_globally(&self, emoji_id: &EmojiId) -> Result<i64, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_emoji_times_used_globally =
+            match db_conn.prepare_cached(PG_SELECT_STATS_EMOJI_TIMES_USED_GLOBALLY) {
+                Ok(select_stats_emoji_times_used_globally) => {
+                    select_stats_emoji_times_used_globally
+                }
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let emoji_id = emoji_id.0 as i64;
+        let times_used;
+
+        match select_stats_emoji_times_used_globally.query(&[&emoji_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    times_used = 0;
+                } else {
+                    let row = rows.get(0);
+                    times_used = row.get::<usize, i64>(0);
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting global usage stats for emoji: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(times_used)
+    }
+
+    fn command_stats_emoji_times_used_on_server(&self,
+                                                emoji_id: &EmojiId,
+                                                server_id: &ServerId)
+                                                -> Result<i64, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_emoji_times_used_on_server =
+            match db_conn.prepare_cached(PG_SELECT_STATS_EMOJI_TIMES_USED_ON_SERVER) {
+                Ok(select_stats_emoji_times_used_on_server) => {
+                    select_stats_emoji_times_used_on_server
+                }
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let emoji_id = emoji_id.0 as i64;
+        let server_id = server_id.0 as i64;
+        let times_used;
+
+        match select_stats_emoji_times_used_on_server.query(&[&emoji_id, &server_id]) {
+            Ok(rows) => {
+                if rows.len() == 0 {
+                    times_used = 0;
+                } else {
+                    let row = rows.get(0);
+                    times_used = row.get::<usize, i64>(0);
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting server usage stats for emoji: {}", reason);
+                return Err(());
+            }
+        }
+
+        Ok(times_used)
+    }
+
+    fn command_stats_emoji_top_users_on_server(&self,
+                                               emoji_id: &EmojiId,
+                                               server_id: &ServerId)
+                                               -> Result<String, ()> {
+        let db_conn = self.db_conn.as_ref().unwrap();
+        let select_stats_emoji_top_users_on_server =
+            match db_conn.prepare_cached(PG_SELECT_STATS_EMOJI_TOP_USERS_ON_SERVER) {
+                Ok(select_stats_emoji_top_users_on_server) => {
+                    select_stats_emoji_top_users_on_server
+                }
+                Err(reason) => {
+                    error!("Error creating prepared statement: {}", reason);
+                    return Err(());
+                }
+            };
+
+        let mut stats = "".to_string();
+
+        let emoji_id = emoji_id.0 as i64;
+        let server_id = server_id.0 as i64;
+
+        match select_stats_emoji_top_users_on_server.query(&[&emoji_id, &server_id]) {
+            Ok(rows) => {
+                let mut first_row = true;
+
+                for row in &rows {
+                    let user_id = row.get::<usize, i64>(0);
+                    let use_count = row.get::<usize, i64>(1);
+
+                    stats += &format!("Used by <@{}> {} time{} ",
+                            user_id,
+                            use_count,
+                            if use_count == 1 { "" } else { "s" });
+
+                    if first_row {
+                        stats += EMOJI_CROWN;
+                        first_row = false;
+                    }
+
+                    stats += "\n";
+                }
+            }
+            Err(reason) => {
+                error!("Error selecting server usage stats for emoji: {}", reason);
                 return Err(());
             }
         }
@@ -1176,8 +1429,7 @@ impl EsBot {
                 Ok(rows) => {
                     if rows.len() > 0 {
                         let emoji_id = rows.get(0).get::<usize, i64>(0) as u64;
-                        self.unicode_emojis
-                            .insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
+                        self.unicode_emojis.insert(emoji.clone(), EmojiId(emoji_id));
                         continue;
                     }
                 }
@@ -1213,8 +1465,7 @@ impl EsBot {
                 Ok(rows) => {
                     for row in &rows {
                         let emoji_id = row.get::<usize, i64>(0) as u64;
-                        self.unicode_emojis
-                            .insert((emoji.clone(), emoji_desc.clone()), EmojiId(emoji_id));
+                        self.unicode_emojis.insert(emoji.clone(), EmojiId(emoji_id));
                         continue;
                     }
                 }

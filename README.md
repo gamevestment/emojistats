@@ -27,6 +27,7 @@ Alternatively, you may directly message the bot. When you send a direct message,
 |`<#channel>`|Public text channels only|See the top used emoji on the specified channel|
 |`me`        |Anywhere                 |See your favourite emoji                       |
 |`<@user>`   |Anywhere                 |See the specified user's favourite emoji       |
+|`<emoji>`   |Anywhere                 |See usage information for that emoji           |
 
 ### Bot control
 
