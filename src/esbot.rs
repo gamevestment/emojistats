@@ -405,7 +405,7 @@ impl EsBot {
                 _ => {}
             }
 
-            if self.quit {
+            if self.quit || self.restart {
                 break;
             }
         }
@@ -495,31 +495,14 @@ impl EsBot {
                         self.command_user(&message.channel_id, &message.author.id);
                     }
                     "quit" => {
-                        if !self.control_users.contains(&message.author.id) {
-                            self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
-                            return;
-                        }
-
-                        self.send_message(&message.channel_id, MESSAGE_QUITTING);
-
-                        info!("Quitting per {}:\"{}\"",
-                              &message.author.id.0,
-                              &message.author.name);
-                        self.quit = true;
+                        self.command_quit(&message.channel_id,
+                                          &message.author.id,
+                                          &message.author.name);
                     }
                     "restart" => {
-                        if !self.control_users.contains(&message.author.id) {
-                            self.send_message(&message.channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
-                            return;
-                        }
-
-                        self.send_message(&message.channel_id, MESSAGE_RESTARTING);
-
-                        info!("Restarting per {}:\"{}\"",
-                              &message.author.id.0,
-                              &message.author.name);
-                        self.quit = true;
-                        self.restart = true;
+                        self.command_restart(&message.channel_id,
+                                             &message.author.id,
+                                             &message.author.name);
                     }
                     unknown_command => {
                         // TODO: Test whether this is a Unicode emoji
@@ -724,6 +707,36 @@ impl EsBot {
     fn command_emoji_id(&self, response_channel_id: &ChannelId, emoji_id: u64) {
         // TODO: command_emoji_id
         self.send_message(response_channel_id, format!("Stats for emoji {}", emoji_id));
+    }
+
+    fn command_quit(&mut self,
+                    response_channel_id: &ChannelId,
+                    user_id: &UserId,
+                    user_name: &str) {
+        if !self.control_users.contains(user_id) {
+            self.send_message(response_channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
+            return;
+        }
+
+        self.send_message(response_channel_id, MESSAGE_QUITTING);
+
+        info!("Quitting per <@{}> = \"{}\"", user_id.0, user_name);
+        self.quit = true;
+    }
+
+    fn command_restart(&mut self,
+                       response_channel_id: &ChannelId,
+                       user_id: &UserId,
+                       user_name: &str) {
+        if !self.control_users.contains(user_id) {
+            self.send_message(response_channel_id, MESSAGE_COMMAND_REQUIRES_AUTH);
+            return;
+        }
+
+        self.send_message(response_channel_id, MESSAGE_RESTARTING);
+
+        info!("Restarting per <@{}> = \"{}\"", user_id.0, user_name);
+        self.restart = true;
     }
 
     fn command_stats_global(&self) -> Result<String, ()> {
