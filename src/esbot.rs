@@ -267,14 +267,15 @@ const MESSAGE_ERROR_OBTAINING_STATS: &str = "\
 An error occurred while obtaining the statistics. \u{1F625}";
 const MESSAGE_HELP: &str = "\
 **\u{26A1} Commands**
-**about:** See information about the bot
-**global:** See the top used Unicode emoji globally
+**about:** See information about the bot \u{1F916}
+**global:** See the top used Unicode emoji globally \u{1F310}
 **server:** See the top used emoji on this server
 **channel:** See the top used emoji on this channel
 **<#channel>:** See the top used emoji on the specified channel
-**me:** See your favourite emoji
+**me:** See your favourite emoji \u{2764}
 **<@user>:** See the specified user's favourite emoji
-**<emoji>:** See usage information for that emoji";
+**<emoji>:** See usage information for that emoji
+**meta:** See numbers about the bot \u{1F522}";
 const MESSAGE_HELP_HINT: &str = "\
 To see a list of commands, use `help`.";
 
