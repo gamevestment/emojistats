@@ -20,5 +20,5 @@ version = "0.8.0"
 default-features = false
 
 [dependencies.postgres]
-version = "0.14"
+version = "0.15.1"
 default-features = false

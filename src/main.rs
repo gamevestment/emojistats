@@ -3,15 +3,18 @@ extern crate config;
 extern crate log;
 extern crate log4rs;
 extern crate nix;
+extern crate postgres;
 
 mod arg;
 mod bot_utility;
+mod emojistats;
 mod bot;
 
 use std::env::args;
 use std::ffi::CString;
 use std::process;
 use nix::unistd::execv;
+use emojistats::Database;
 use bot::BotDisposition;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
@@ -24,6 +27,7 @@ enum ExitStatus {
     UnableToObtainExecutablePath = 11,
     UnableToRestart = 12,
     UnableToConvertCString = 13,
+    UnableToCreateDatabaseConnection = 21,
 }
 
 // Initialize log4rs to log to LOG_FILENAME
@@ -119,12 +123,42 @@ fn main() {
         process::exit(ExitStatus::UnableToObtainConfig as i32);
     };
 
+    // Get database settings and connect to the database
+    let mut db_conn_params_builder = postgres::params::Builder::new();
+
+    if let Ok(port) = config.get_int("database.port") {
+        db_conn_params_builder.port(port as u16);
+    }
+
+    if let Ok(user) = config.get_str("database.username") {
+        db_conn_params_builder.user(&user,
+                                    config
+                                        .get_str("database.password")
+                                        .ok()
+                                        .as_ref()
+                                        .map(String::as_str));
+    }
+
+    let db_conn_params =
+        db_conn_params_builder
+            .build(postgres::params::Host::Tcp(config
+                                                   .get_str("database.hostname")
+                                                   .unwrap_or("localhost".to_string())));
+
+    let db = match Database::new(db_conn_params) {
+        Ok(db) => db,
+        Err(reason) => {
+            error!("Unable to connect to database: {}", reason);
+            process::exit(ExitStatus::UnableToCreateDatabaseConnection as i32);
+        }
+    };
+
     // Get bot settings and connect to Discord
     let bot_token = config.get_str("config.bot_token").unwrap_or("".to_string());
     let bot_admin_password = config
         .get_str("config.bot_admin_password")
         .unwrap_or("".to_string());
-    let bot = match bot::Bot::new(&bot_token, &bot_admin_password) {
+    let bot = match bot::Bot::new(&bot_token, &bot_admin_password, db) {
         Ok(bot) => bot,
         Err(bot_error) => process::exit(bot_error as i32),
     };

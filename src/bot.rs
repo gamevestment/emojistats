@@ -6,6 +6,7 @@ use arg;
 use std::collections::{HashMap, HashSet};
 use bot_utility::{extract_preceding_arg, remove_non_command_characters, extract_first_word,
                   MessageRecipient};
+use emojistats::Database;
 
 use self::chrono_humanize::HumanTime;
 use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, Message,
@@ -43,10 +44,11 @@ pub struct Bot {
     public_text_channels: HashMap<ChannelId, PublicChannel>,
     private_channels: HashSet<ChannelId>,
     unknown_public_text_channels: HashSet<ChannelId>,
+    db: Database,
 }
 
 impl Bot {
-    pub fn new(bot_token: &str, bot_admin_password: &str) -> Result<Bot, BotError> {
+    pub fn new(bot_token: &str, bot_admin_password: &str, db: Database) -> Result<Bot, BotError> {
         let discord = match discord::Discord::from_bot_token(bot_token) {
             Ok(discord) => discord,
             Err(reason) => {
@@ -92,6 +94,7 @@ impl Bot {
                public_text_channels: HashMap::new(),
                private_channels: HashSet::new(),
                unknown_public_text_channels: HashSet::new(),
+               db,
            })
     }
 
