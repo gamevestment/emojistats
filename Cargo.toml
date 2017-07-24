@@ -2,21 +2,21 @@
 name = "emojistats"
 version = "0.1.1"
 authors = ["Jonathan Kim <jkim8192@gmail.com>"]
-license = "MIT"
 
 [dependencies]
-dotenv = "0.10"
-log = "0.3"
+chrono-humanize = "0.0.10"
+config = "0.6.0"
+log = "0.3.8"
 nix = "0.8.1"
-time = "0.1.37"
+time = "0.1.38"
 
 [dependencies.log4rs]
-version = "0.7"
+version = "0.7.0"
 default-features = false
-features = ["console_appender", "file_appender", "pattern_encoder"]
+features = ["file_appender", "pattern_encoder"]
 
 [dependencies.discord]
-version = "0.8"
+version = "0.8.0"
 default-features = false
 
 [dependencies.postgres]

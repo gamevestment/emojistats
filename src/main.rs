@@ -1,240 +1,140 @@
-extern crate dotenv;
+extern crate config;
 #[macro_use]
 extern crate log;
 extern crate log4rs;
 extern crate nix;
 
-use std::io::{BufReader, BufRead};
-use std::fs::File;
-use std::path::Path;
-use std::env::current_exe;
-use nix::unistd::execv;
-use std::ffi::CString;
-
 mod arg;
-mod esbot;
+mod bot_utility;
+mod bot;
+
+use std::env::args;
+use std::ffi::CString;
+use std::process;
+use nix::unistd::execv;
+use bot::BotDisposition;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_LOG_FILENAME: &str = "emojistats.log";
-const DEFAULT_UNICODE_EMOJI_FILENAME: &str = "unicode-emoji.txt";
-const LOG_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: {h({l})}: {m}{n}";
+const LOG_FILENAME: &str = "emojistats.log";
+const LOG_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(local)}: [{M}] {h([{l}])} {m}{n}";
 
-const EXIT_STATUS_BOT_TOKEN_MISSING: i32 = 1;
-const EXIT_STATUS_DB_CONFIG_INVALID: i32 = 2;
-const EXIT_STATUS_UNABLE_TO_RESTART: i32 = 11;
-
-fn get_env_string(key: &str) -> Option<String> {
-    let value = dotenv::var(key)
-        .unwrap_or("".to_string())
-        .trim()
-        .to_string();
-
-    if value.len() > 0 { Some(value) } else { None }
+enum ExitStatus {
+    UnableToObtainConfig = 10,
+    UnableToObtainExecutablePath = 11,
+    UnableToRestart = 12,
+    UnableToConvertCString = 13,
 }
 
+// Initialize log4rs to log to LOG_FILENAME
 fn init_logging() {
-    let filename = get_env_string("ES_LOG_FILENAME").unwrap_or(DEFAULT_LOG_FILENAME.to_string());
+    let filename = LOG_FILENAME;
 
-    let log_level_filter: log::LogLevelFilter;
-    if cfg!(debug_assertions) {
-        log_level_filter = log::LogLevelFilter::Debug;
+    // Set log level based on whether the program was built for debug or release
+    let log_level_filter = if cfg!(debug_assertions) {
+        log::LogLevelFilter::Debug
     } else {
-        log_level_filter = log::LogLevelFilter::Info;
-    }
+        log::LogLevelFilter::Info
+    };
 
-    let file_encoder = Box::new(log4rs::encode::pattern::PatternEncoder::new(LOG_FORMAT));
+    // Build appender for file log
     let file = log4rs::append::file::FileAppender::builder()
-        .encoder(file_encoder)
+        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(LOG_FORMAT)))
         .build(filename)
         .expect("Failed to create log file");
     let file_appender = log4rs::config::Appender::builder().build("file", Box::new(file));
 
-    let stdout_encoder = Box::new(log4rs::encode::pattern::PatternEncoder::new(LOG_FORMAT));
-    let stdout = log4rs::append::console::ConsoleAppender::builder()
-        .encoder(stdout_encoder)
-        .build();
-    let stdout_appender = log4rs::config::Appender::builder().build("stdout", Box::new(stdout));
-
-    let mut logger = log4rs::config::Logger::builder();
-    let mut root = log4rs::config::Root::builder();
-
-    if cfg!(debug_assertions) {
-        root = root.appender("file").appender("stdout");
-    } else {
-        logger = logger.appender("file").appender("stdout");
-    }
-
+    // Put everything together
+    let root = log4rs::config::Root::builder()
+        .appender("file")
+        .build(log_level_filter);
     let config = log4rs::config::Config::builder()
         .appender(file_appender)
-        .appender(stdout_appender)
-        .logger(logger.build(PROGRAM_NAME, log_level_filter))
-        .build(root.build(log_level_filter))
+        .build(root)
         .expect("Failed to build logging configuration");
 
-    log4rs::init_config(config).expect("Failed to initialize logger");
+    log4rs::init_config(config).expect("Failed to initialize log4rs");
 }
 
-fn pg_get_conn_str() -> Result<(String, String), String> {
-    let user = match get_env_string("ES_DB_USER") {
-        Some(user) => user,
+fn str_ref_to_cstring(s: &str, string_descr: &str) -> CString {
+    match CString::new(s) {
+        Ok(cs) => cs,
+        Err(reason) => {
+            error!("Failed to convert {} \"{}\" to CString: {}",
+                   string_descr,
+                   s,
+                   reason);
+            process::exit(ExitStatus::UnableToConvertCString as i32);
+        }
+    }
+}
+
+fn restart() {
+    let mut env_args = args();
+
+    // Attempt to convert the executable path to a CString
+    let exec_path = match env_args.next() {
+        Some(exec_path) => exec_path,
         None => {
-            return Err("No user specified".to_string());
+            error!("Unable to obtain executable path");
+            process::exit(ExitStatus::UnableToObtainExecutablePath as i32);
         }
     };
+    let exec_path_cstring = str_ref_to_cstring(&exec_path, "executable path");
 
-    let mut password = get_env_string("ES_DB_PASS").unwrap_or("".to_string());
-    if password.len() > 0 {
-        password = format!(":{}", password);
+    // Create a vector of the program arguments to pass on
+    let mut execv_args = Vec::<CString>::new();
+    execv_args.push(exec_path_cstring.clone());
+
+    // Attempt to convert all program arguments to CStrings
+    for arg in env_args {
+        execv_args.push(str_ref_to_cstring(&arg, "program argument"));
     }
 
-    let host = dotenv::var("ES_DB_HOST").unwrap_or("localhost".to_string());
-
-    let port = if let Some(port_str) = get_env_string("ES_DB_PORT") {
-        match port_str.parse::<u16>() {
-            Ok(port) => format!(":{}", port),
-            Err(_) => {
-                return Err(format!("Invalid port number \"{}\"", port_str));
-            }
+    match execv(&exec_path_cstring, &execv_args) {
+        Err(reason) => {
+            error!("Unable to restart \"{}\": {}", exec_path, reason);
+            process::exit(ExitStatus::UnableToRestart as i32);
         }
-    } else {
-        "".to_string()
-    };
-
-    let database = match get_env_string("ES_DB_NAME") {
-        Some(database) => database,
-        None => {
-            return Err("No database specified".to_string());
-        }
-    };
-
-    let pg_conn_str = format!("postgres://{}{}@{}{}/{}",
-                              user,
-                              password,
-                              host,
-                              port,
-                              database);
-    let pg_conn_str_redacted = format!("postgres://{}{}@{}{}/{}",
-                                       user,
-                                       if password.len() > 0 {
-                                           ":<REDACTED>"
-                                       } else {
-                                           ""
-                                       },
-                                       host,
-                                       port,
-                                       database);
-
-    Ok((pg_conn_str, pg_conn_str_redacted))
+        _ => {}
+    }
 }
 
 fn main() {
-    let exec_name = current_exe();
-
-    dotenv::dotenv().ok();
     init_logging();
+    info!("Starting {} (version {}).", PROGRAM_NAME, PROGRAM_VERSION);
 
-    info!("Started {} v{}", PROGRAM_NAME, PROGRAM_VERSION);
+    // Discard nth(0), which is the name of the program
+    // Use nth(1) as the config filename (without the suffix), or if it is not present, use "config"
+    let config_filename = &args().nth(1).unwrap_or("config".to_string());
 
-    let (pg_conn_str, pg_conn_str_redacted) = match pg_get_conn_str() {
-        Ok((pg_conn_str, pg_conn_str_redacted)) => (pg_conn_str, pg_conn_str_redacted),
-        Err(reason) => {
-            error!("Failed to build PostgreSQL connection string: {}", reason);
-            std::process::exit(EXIT_STATUS_DB_CONFIG_INVALID);
-        }
+    // Attempt to load the config file
+    let mut maybe_config = config::Config::new();
+    let maybe_config = maybe_config.merge(config::File::with_name(&config_filename));
+    let config = if maybe_config.is_ok() {
+        maybe_config.unwrap()
+    } else {
+        error!("Unable to open any config files beginning with \"{}\".",
+               config_filename);
+        process::exit(ExitStatus::UnableToObtainConfig as i32);
     };
 
-    let bot_token = match get_env_string("ES_BOT_TOKEN") {
-        Some(bot_token) => bot_token,
-        None => {
-            error!("No bot token found");
-            std::process::exit(EXIT_STATUS_BOT_TOKEN_MISSING);
-        }
-    };
-
-    let bot_control_password = get_env_string("ES_BOT_CONTROL_PASSWORD")
+    // Get bot settings and connect to Discord
+    let bot_token = config.get_str("config.bot_token").unwrap_or("".to_string());
+    let bot_admin_password = config
+        .get_str("config.bot_admin_password")
         .unwrap_or("".to_string());
-
-    debug!("Connecting to \"{}\"", pg_conn_str_redacted);
-
-    let mut eb = esbot::EsBot::new(pg_conn_str, bot_token, bot_control_password);
-
-    let mut unicode_emojis: Vec<(String, String)> = Vec::new();
-
-    let unicode_emoji_filename = get_env_string("ES_UNICODE_EMOJI_FILENAME")
-        .unwrap_or(DEFAULT_UNICODE_EMOJI_FILENAME.to_string());
-
-    match File::open(Path::new(&unicode_emoji_filename)) {
-        Ok(file) => {
-            for line in BufReader::new(file).lines() {
-                match line {
-                    Ok(line) => {
-                        let line = line.trim();
-
-                        // Skip empty lines and comments
-                        if line.is_empty() || line.starts_with("#") {
-                            continue;
-                        }
-
-                        let parts: Vec<&str> = line.split("=>").collect();
-
-                        if parts.len() != 2 {
-                            warn!("Invalid line: \"{}\"", line);
-                            continue;
-                        }
-
-                        unicode_emojis
-                            .push((parts[0].trim().to_string(), parts[1].trim().to_string()));
-                    }
-                    Err(reason) => {
-                        warn!("Error during reading of Unicode emoji: {}", reason);
-                    }
-                }
-            }
-        }
-        Err(reason) => {
-            warn!("Failed to load Unicode emoji file \"{}\": {}",
-                  unicode_emoji_filename,
-                  reason);
-        }
+    let bot = match bot::Bot::new(&bot_token, &bot_admin_password) {
+        Ok(bot) => bot,
+        Err(bot_error) => process::exit(bot_error as i32),
     };
+    info!("Connected to Discord successfully");
 
-    let exit_status = eb.run(&unicode_emojis);
+    // Perform other setup tasks
 
-    if exit_status == esbot::EXIT_STATUS_RESTART {
-        let pathbuf = match exec_name {
-            Ok(pathbuf) => pathbuf,
-            Err(reason) => {
-                error!("Unable to obtain executable name: {}", reason);
-                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
-            }
-        };
-
-        let exec_path_str = match pathbuf.as_os_str().to_str() {
-            Some(exec_path_str) => exec_path_str,
-            None => {
-                error!("Unable to convert \"{:?}\" to str", pathbuf);
-                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
-            }
-        };
-
-        let exec_path_cstring = match CString::new(exec_path_str) {
-            Ok(exec_path_cstring) => exec_path_cstring,
-            Err(reason) => {
-                error!("Unable to convert executable path \"{}\" to CString: {}",
-                       exec_path_str,
-                       reason);
-                std::process::exit(EXIT_STATUS_UNABLE_TO_RESTART);
-            }
-        };
-
-        match execv(&exec_path_cstring, &[]) {
-            Err(reason) => {
-                error!("Unable to restart \"{}\": {}", exec_path_str, reason);
-            }
-            _ => {}
-        };
+    // Begin event loop
+    match bot.run() {
+        BotDisposition::Quit => {}
+        BotDisposition::Restart => restart(),
     }
-
-    std::process::exit(exit_status);
 }
