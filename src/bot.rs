@@ -392,7 +392,26 @@ impl Bot {
                     "botinfo" => self.bot_info(message),
                     "quit" => self.quit(message),
                     "restart" => self.restart(message),
-                    _ => BotLoopDisposition::Continue, // Unknown command
+                    "about" | "info" => self.about(message),
+                    "help" | "commands" => self.help(message),
+                    "global" => self.stats_global(message),
+                    "server" => self.stats_server(message),
+                    "channel" => self.stats_channel(message),
+                    "user" => self.stats_user(message, args),
+                    _ => {
+                        // Something else
+                        // Did the user begin the message with a #channel or mention a user?
+                        match arg::get_type(command) {
+                            arg::Type::UserId(_user_id) => {}
+                            arg::Type::ChannelId(_channel_id) => {}
+                            _ => {
+                                // Unknown command
+                                // Show help
+                            }
+                        }
+
+                        BotLoopDisposition::Continue
+                    }
                 }
             }
             _ => BotLoopDisposition::Continue, // No command was provided; continue to next event
@@ -475,6 +494,30 @@ impl Bot {
             self.respond_auth_required(message);
             BotLoopDisposition::Continue
         }
+    }
+
+    fn about(&self, _message: &Message) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
+    }
+
+    fn help(&self, _message: &Message) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_global(&self, _message: &Message) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_server(&self, _message: &Message) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_channel(&self, _message: &Message) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_user(&self, _message: &Message, _args: &str) -> BotLoopDisposition {
+        BotLoopDisposition::Continue
     }
 
     fn respond_auth_required(&self, message: &Message) {
