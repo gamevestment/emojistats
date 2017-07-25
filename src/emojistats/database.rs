@@ -32,6 +32,10 @@ impl Database {
         Ok(())
     }
 
+    pub fn add_emoji(&self, _emoji: &Emoji) -> postgres::Result<()> {
+        Ok(())
+    }
+
     pub fn message_exists(&self, _message_id: &MessageId) -> postgres::Result<bool> {
         Ok(false)
     }

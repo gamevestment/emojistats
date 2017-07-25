@@ -104,6 +104,21 @@ fn restart() {
     }
 }
 
+fn load_unicode_emoji(config: &config::Config, bot: &mut bot::Bot) {
+    let mut num_emoji_loaded = 0;
+
+    if let Ok(emoji_list) = config.get_array("emojistats.emoji") {
+        for emoji_value in emoji_list {
+            if let Ok(emoji) = emoji_value.into_str() {
+                bot.add_unicode_emoji(emoji);
+                num_emoji_loaded += 1;
+            }
+        }
+    }
+
+    info!("Loaded {} Unicode emoji from config", num_emoji_loaded);
+}
+
 fn main() {
     init_logging();
     info!("Starting {} (version {}).", PROGRAM_NAME, PROGRAM_VERSION);
@@ -139,6 +154,10 @@ fn main() {
                                         .map(String::as_str));
     }
 
+    if let Ok(database_name) = config.get_str("database.name") {
+        db_conn_params_builder.database(&database_name);
+    }
+
     let db_conn_params =
         db_conn_params_builder
             .build(postgres::params::Host::Tcp(config
@@ -158,13 +177,14 @@ fn main() {
     let bot_admin_password = config
         .get_str("config.bot_admin_password")
         .unwrap_or("".to_string());
-    let bot = match bot::Bot::new(&bot_token, &bot_admin_password, db) {
+    let mut bot = match bot::Bot::new(&bot_token, &bot_admin_password, db) {
         Ok(bot) => bot,
         Err(bot_error) => process::exit(bot_error as i32),
     };
     info!("Connected to Discord successfully");
 
     // Perform other setup tasks
+    load_unicode_emoji(&config, &mut bot);
 
     // Begin event loop
     match bot.run() {

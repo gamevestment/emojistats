@@ -6,7 +6,7 @@ use arg;
 use std::collections::{HashMap, HashSet};
 use bot_utility::{extract_preceding_arg, remove_non_command_characters, extract_first_word,
                   MessageRecipient};
-use emojistats::Database;
+use emojistats::{Database, Emoji};
 
 use self::chrono_humanize::HumanTime;
 use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, Message,
@@ -45,6 +45,7 @@ pub struct Bot {
     private_channels: HashSet<ChannelId>,
     unknown_public_text_channels: HashSet<ChannelId>,
     db: Database,
+    emoji: Vec<Emoji>,
 }
 
 impl Bot {
@@ -95,7 +96,22 @@ impl Bot {
                private_channels: HashSet::new(),
                unknown_public_text_channels: HashSet::new(),
                db,
+               emoji: Vec::new(),
            })
+    }
+
+    pub fn add_unicode_emoji(&mut self, emoji: String) {
+        let emoji = Emoji::Unicode(emoji);
+
+        match self.db.add_emoji(&emoji) {
+            Ok(_) => {}
+            Err(reason) => {
+                warn!("Error adding Unicode emoji <{:?}> to database: {}",
+                      emoji,
+                      reason);
+            }
+        }
+        self.emoji.push(emoji);
     }
 
     pub fn run(mut self) -> BotDisposition {
