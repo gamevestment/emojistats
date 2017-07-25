@@ -6,7 +6,7 @@ use arg;
 use std::collections::{HashMap, HashSet};
 use bot_utility::{extract_preceding_arg, remove_non_command_characters, extract_first_word,
                   MessageRecipient};
-use emojistats::{Database, Emoji};
+use emojistats::{CustomEmoji, Database, Emoji};
 
 use self::chrono_humanize::HumanTime;
 use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, Message,
@@ -45,7 +45,7 @@ pub struct Bot {
     private_channels: HashSet<ChannelId>,
     unknown_public_text_channels: HashSet<ChannelId>,
     db: Database,
-    emoji: Vec<Emoji>,
+    emoji: HashSet<Emoji>,
 }
 
 impl Bot {
@@ -96,7 +96,7 @@ impl Bot {
                private_channels: HashSet::new(),
                unknown_public_text_channels: HashSet::new(),
                db,
-               emoji: Vec::new(),
+               emoji: HashSet::new(),
            })
     }
 
@@ -111,7 +111,7 @@ impl Bot {
                       reason);
             }
         }
-        self.emoji.push(emoji);
+        self.emoji.insert(emoji);
     }
 
     pub fn run(mut self) -> BotDisposition {
@@ -129,9 +129,15 @@ impl Bot {
                 Ok(Event::MessageCreate(message)) => {
                     bot_loop_disposition = self.process_message(message);
                 }
-                Ok(Event::ServerCreate(_)) => {
+                Ok(Event::ServerCreate(server)) => {
                     // Don't call refresh_servers() - when the bot is starting up, this will spam
                     // Discord because on startup, an event is generated for every server
+                    match server {
+                        PossibleServer::Online(server) => {
+                            self.add_emoji_list(server.id, server.emojis);
+                        }
+                        PossibleServer::Offline(_) => {}
+                    }
                 }
                 Ok(Event::ServerUpdate(server)) => {
                     self.update_server(server);
@@ -154,6 +160,9 @@ impl Bot {
                 }
                 Ok(Event::ChannelUpdate(channel)) => {
                     self.update_channel(channel);
+                }
+                Ok(Event::ServerEmojisUpdate(server_id, emoji_list)) => {
+                    self.add_emoji_list(server_id, emoji_list);
                 }
                 _ => {}
             }
@@ -207,6 +216,8 @@ impl Bot {
     }
 
     fn update_server(&mut self, new_server_info: Server) {
+        self.add_emoji_list(new_server_info.id, new_server_info.emojis);
+
         if let Some(server) = self.servers.get_mut(&new_server_info.id) {
             debug!("Updating server info: {} -> {} ({})",
                    server.name,
@@ -288,6 +299,25 @@ impl Bot {
             }
             Channel::Private(_) => {}
             Channel::Group(_) => {}
+        }
+    }
+
+    fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
+        for emoji in emoji_list {
+            let custom_emoji = &Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+
+            match self.db.add_emoji(&custom_emoji) {
+                Ok(_) => {
+                    debug!("Added custom emoji on server ({}): <{:?}>",
+                           server_id,
+                           custom_emoji);
+                }
+                Err(reason) => {
+                    warn!("Error adding custom emoji <{:?}> to database: {}",
+                          custom_emoji,
+                          reason);
+                }
+            }
         }
     }
 

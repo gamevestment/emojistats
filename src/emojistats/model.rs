@@ -1,19 +1,34 @@
 extern crate discord;
 
+use std::hash::{Hash, Hasher};
 use self::discord::model::{EmojiId, ServerId};
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub enum Emoji {
     Custom(CustomEmoji),
     Unicode(String), // Some emoji span multiple chars
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct CustomEmoji {
     server_id: ServerId,
     id: EmojiId,
     name: String,
     pattern: String,
+}
+
+impl Hash for CustomEmoji {
+    fn hash<H>(&self, state: &mut H)
+        where H: Hasher
+    {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for CustomEmoji {
+    fn eq(&self, other: &CustomEmoji) -> bool {
+        self.id == other.id
+    }
 }
 
 impl CustomEmoji {
