@@ -304,7 +304,7 @@ impl Bot {
 
     fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
         for emoji in emoji_list {
-            let custom_emoji = &Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
 
             match self.db.add_emoji(&custom_emoji) {
                 Ok(_) => {
@@ -318,6 +318,8 @@ impl Bot {
                           reason);
                 }
             }
+
+            self.emoji.insert(custom_emoji);
         }
     }
 
@@ -377,8 +379,31 @@ impl Bot {
             return self.process_command(&message, &message.content);
         }
 
-        // This is not a command; continue to the next event
+        // This is not a command; log the emoji and continue to the next event
+        self.log_emoji_usage(&message);
         BotLoopDisposition::Continue
+    }
+
+    fn log_emoji_usage(&self, message: &Message) {
+        for emoji in &self.emoji {
+            let pattern = match *emoji {
+                Emoji::Custom(ref custom_emoji) => &custom_emoji.pattern,
+                Emoji::Unicode(ref emoji) => emoji,
+            };
+
+            let count = message.content.matches(pattern).count() as i64;
+
+            if count > 0 {
+                match self.db
+                          .record_emoji_usage(&message.channel_id,
+                                              &message.author.id,
+                                              emoji,
+                                              count) {
+                    Ok(_) => {}
+                    Err(reason) => warn!("Error recording emoji usage: {}", reason),
+                }
+            }
+        }
     }
 
     fn process_command(&mut self, message: &Message, command: &str) -> BotLoopDisposition {

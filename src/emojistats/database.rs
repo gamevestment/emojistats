@@ -41,11 +41,30 @@ impl Database {
     }
 
     pub fn record_emoji_usage(&self,
-                              _channel_id: &ChannelId,
-                              _user_id: &UserId,
-                              _emoji: Emoji,
-                              _count: i64)
+                              channel_id: &ChannelId,
+                              user_id: &UserId,
+                              emoji: &Emoji,
+                              count: i64)
                               -> postgres::Result<()> {
+        match *emoji {
+            Emoji::Custom(ref custom_emoji) => {
+                debug!("Custom emoji {} used {} time{} by {} in channel {}",
+                       custom_emoji.pattern,
+                       count,
+                       if count == 1 { "" } else { "s" },
+                       user_id,
+                       channel_id);
+            }
+            Emoji::Unicode(ref emoji) => {
+                debug!("Emoji {} used {} time{} by {} in channel {}",
+                       emoji,
+                       count,
+                       if count == 1 { "" } else { "s" },
+                       user_id,
+                       channel_id);
+            }
+        }
+
         Ok(())
     }
 

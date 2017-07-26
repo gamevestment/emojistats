@@ -11,10 +11,10 @@ pub enum Emoji {
 
 #[derive(Debug, Eq)]
 pub struct CustomEmoji {
-    server_id: ServerId,
-    id: EmojiId,
-    name: String,
-    pattern: String,
+    pub server_id: ServerId,
+    pub id: EmojiId,
+    pub name: String,
+    pub pattern: String,
 }
 
 impl Hash for CustomEmoji {
@@ -36,7 +36,7 @@ impl CustomEmoji {
         where S: Into<String>
     {
         let name = name.into();
-        let pattern = format!("<:{}:{}>", id, name);
+        let pattern = format!("<:{}:{}>", name, id);
 
         CustomEmoji {
             server_id,
