@@ -32,7 +32,34 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_emoji(&self, _emoji: &Emoji) -> postgres::Result<()> {
+    pub fn add_emoji(&self, emoji: &Emoji) -> postgres::Result<()> {
+        const QUERY_INSERT_CUSTOM_EMOJI: &str = r#"
+        INSERT INTO emoji (id, name, is_custom_emoji)
+        VALUES ($1, $2, TRUE)
+        ON CONFLICT (id) DO UPDATE
+            SET name = excluded.name;"#;
+
+        const QUERY_INSERT_UNICODE_EMOJI: &str = r#"
+        INSERT INTO emoji (name, is_custom_emoji)
+        VALUES ($1, FALSE);"#;
+
+        match *emoji {
+            Emoji::Custom(ref emoji) => {
+                self.conn
+                    .execute(QUERY_INSERT_CUSTOM_EMOJI,
+                             &[&(emoji.id.0 as i64), &emoji.name])?;
+            }
+            Emoji::Unicode(ref emoji) => {
+                // Only insert Unicode emoji if they aren't already in the database
+                match self.get_emoji_id(emoji.clone())? {
+                    Some(_) => {}
+                    None => {
+                        self.conn.execute(QUERY_INSERT_UNICODE_EMOJI, &[&emoji])?;
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -66,6 +93,23 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub fn get_emoji_id<S>(&self, name: S) -> postgres::Result<Option<u64>>
+        where S: Into<String>
+    {
+        const QUERY_GET_EMOJI_ID: &str = r#"
+        SELECT id
+        FROM emoji
+        WHERE name = $1;"#;
+
+        let result = self.conn.query(QUERY_GET_EMOJI_ID, &[&name.into()])?;
+
+        if result.len() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(result.get(0).get::<usize, i64>(0) as u64))
+        }
     }
 
     pub fn get_global_top_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
@@ -114,6 +158,39 @@ impl Database {
     }
 }
 
-fn create_tables(_db_conn: &postgres::Connection) -> postgres::Result<()> {
+fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
+    const QUERY_CREATE_TABLES: &str = r#"
+    CREATE TABLE IF NOT EXISTS emoji (
+        id BIGSERIAL NOT NULL,
+        name VARCHAR(512) NOT NULL,
+        is_custom_emoji BOOL NOT NULL,
+        PRIMARY KEY (id)
+    );
+    CREATE TABLE IF NOT EXISTS public_channel (
+        id BIGINT NOT NULL,
+        guild_id BIGINT NULL,
+        name VARCHAR(512),
+        PRIMARY KEY (id)
+    );
+    CREATE TABLE IF NOT EXISTS message (
+        id BIGINT,
+        public_channel_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        emoji_count INTEGER NOT NULL,
+        PRIMARY KEY (id),
+        FOREIGN KEY (public_channel_id) REFERENCES public_channel (id)
+    );
+    CREATE TABLE IF NOT EXISTS emoji_usage (
+        public_channel_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        emoji_id BIGINT NOT NULL,
+        use_count INTEGER NOT NULL,
+        PRIMARY KEY (public_channel_id, emoji_id, user_id),
+        FOREIGN KEY (public_channel_id) REFERENCES public_channel (id),
+        FOREIGN KEY (emoji_id) REFERENCES emoji (id)
+    );"#;
+
+    db_conn.batch_execute(QUERY_CREATE_TABLES)?;
+
     Ok(())
 }
