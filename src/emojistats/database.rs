@@ -170,7 +170,24 @@ impl Database {
     }
 
     pub fn get_global_top_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
+        const QUERY_SELECT_TOP_GLOBAL_EMOJI: &str = r#"
+        SELECT e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE e.is_custom_emoji = FALSE
+        GROUP BY e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let mut emoji_usage = Vec::new();
+
+        let result = self.conn.query(QUERY_SELECT_TOP_GLOBAL_EMOJI, &[])?;
+
+        for row in result.iter() {
+            emoji_usage.push((Emoji::Unicode(row.get::<usize, String>(0)), row.get(1)));
+        }
+
+        Ok(emoji_usage)
     }
 
     pub fn get_server_top_emoji(&self,

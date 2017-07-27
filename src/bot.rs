@@ -14,6 +14,8 @@ use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameTyp
                            ServerId, ServerInfo, UserId};
 use self::time::{Timespec, get_time};
 
+const RESPONSE_STATS_ERR: &str = "Sorry! An error occurred while retrieving the statistics.";
+
 #[derive(Debug)]
 pub enum BotError {
     FailedToAuthenticate = 101,
@@ -569,7 +571,42 @@ impl Bot {
         BotLoopDisposition::Continue
     }
 
-    fn stats_global(&self, _message: &Message) -> BotLoopDisposition {
+    fn stats_global(&self, message: &Message) -> BotLoopDisposition {
+        let top_emoji = match self.db.get_global_top_emoji() {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!("Unable to retrieve global top used emoji: {}", reason);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        if top_emoji.len() == 0 {
+            self.send_response(message, "No Unicode emoji have been used.");
+        } else {
+            let mut stats = String::new();
+
+            for (emoji, count) in top_emoji {
+                match emoji {
+                    Emoji::Custom(_) => {}
+                    Emoji::Unicode(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+
+            let _ =
+                self.discord
+                    .send_embed(message.channel_id,
+                                &format!("<@{}>", message.author.id),
+                                |e| {
+                                    e.fields(|f| f.field("Top used emoji globally", &stats, false))
+                                });
+        }
+
         BotLoopDisposition::Continue
     }
 
