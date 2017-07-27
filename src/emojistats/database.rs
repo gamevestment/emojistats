@@ -1,12 +1,14 @@
 extern crate discord;
 extern crate postgres;
 
-use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, ServerInfo, User, UserId};
+use std::collections::HashMap;
+use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, User, UserId};
 use super::model::Emoji;
 
 #[allow(dead_code)]
 pub struct Database {
     conn: postgres::Connection,
+    unicode_emoji_ids: HashMap<String, i64>,
 }
 
 #[allow(dead_code)]
@@ -17,14 +19,25 @@ impl Database {
         let conn = postgres::Connection::connect(params, postgres::TlsMode::None)?;
         create_tables(&conn)?;
 
-        Ok(Database { conn })
+        Ok(Database {
+               conn,
+               unicode_emoji_ids: HashMap::new(),
+           })
     }
 
-    pub fn add_server(&self, _server_info: &ServerInfo) -> postgres::Result<()> {
-        Ok(())
-    }
+    pub fn add_channel(&self, channel: &PublicChannel) -> postgres::Result<()> {
+        const QUERY_INSERT_CHANNEL: &str = r#"
+        INSERT INTO channel (id, server_id, name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO UPDATE
+            SET name = excluded.name;"#;
 
-    pub fn add_channel(&self, _channel: &PublicChannel) -> postgres::Result<()> {
+        self.conn
+            .execute(QUERY_INSERT_CHANNEL,
+                     &[&(channel.id.0 as i64),
+                       &(channel.server_id.0 as i64),
+                       &channel.name])?;
+
         Ok(())
     }
 
@@ -63,17 +76,52 @@ impl Database {
         Ok(())
     }
 
-    pub fn message_exists(&self, _message_id: &MessageId) -> postgres::Result<bool> {
-        Ok(false)
+    pub fn message_exists(&self, message_id: &MessageId) -> postgres::Result<bool> {
+        const QUERY_GET_MESSAGE_EXIST: &str = r#"
+        SELECT id
+        FROM message
+        WHERE id = $1;"#;
+
+        let result = self.conn
+            .query(QUERY_GET_MESSAGE_EXIST, &[&(message_id.0 as i64)])?;
+
+        Ok(result.len() != 0)
+    }
+
+    pub fn record_message_stats(&self,
+                                message_id: &MessageId,
+                                channel_id: &ChannelId,
+                                user_id: &UserId,
+                                emoji_count: i32)
+                                -> postgres::Result<()> {
+        const QUERY_RECORD_MESSAGE_STATS: &str = r#"
+        INSERT INTO message (id, channel_id, user_id, emoji_count)
+        VALUES ($1, $2, $3, $4);"#;
+
+        self.conn
+            .execute(QUERY_RECORD_MESSAGE_STATS,
+                     &[&(message_id.0 as i64),
+                       &(channel_id.0 as i64),
+                       &(user_id.0 as i64),
+                       &emoji_count])?;
+
+        Ok(())
     }
 
     pub fn record_emoji_usage(&self,
                               channel_id: &ChannelId,
                               user_id: &UserId,
                               emoji: &Emoji,
-                              count: i64)
+                              count: i32)
                               -> postgres::Result<()> {
-        match *emoji {
+        const QUERY_RECORD_EMOJI_USAGE: &str =
+            r#"
+        INSERT INTO emoji_usage (channel_id, user_id, emoji_id, use_count)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (channel_id, user_id, emoji_id) DO UPDATE
+            SET use_count = emoji_usage.use_count + excluded.use_count;"#;
+
+        let emoji_id = match *emoji {
             Emoji::Custom(ref custom_emoji) => {
                 debug!("Custom emoji {} used {} time{} by {} in channel {}",
                        custom_emoji.pattern,
@@ -81,6 +129,7 @@ impl Database {
                        if count == 1 { "" } else { "s" },
                        user_id,
                        channel_id);
+                custom_emoji.id.0 as i64
             }
             Emoji::Unicode(ref emoji) => {
                 debug!("Emoji {} used {} time{} by {} in channel {}",
@@ -89,8 +138,16 @@ impl Database {
                        if count == 1 { "" } else { "s" },
                        user_id,
                        channel_id);
+                self.get_emoji_id(emoji.clone())?.unwrap() as i64
             }
-        }
+        };
+
+        self.conn
+            .execute(QUERY_RECORD_EMOJI_USAGE,
+                     &[&(channel_id.0 as i64),
+                       &(user_id.0 as i64),
+                       &emoji_id,
+                       &count])?;
 
         Ok(())
     }
@@ -166,27 +223,27 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         is_custom_emoji BOOL NOT NULL,
         PRIMARY KEY (id)
     );
-    CREATE TABLE IF NOT EXISTS public_channel (
+    CREATE TABLE IF NOT EXISTS channel (
         id BIGINT NOT NULL,
-        guild_id BIGINT NULL,
+        server_id BIGINT NOT NULL,
         name VARCHAR(512),
         PRIMARY KEY (id)
     );
     CREATE TABLE IF NOT EXISTS message (
         id BIGINT,
-        public_channel_id BIGINT NOT NULL,
+        channel_id BIGINT NOT NULL,
         user_id BIGINT NOT NULL,
         emoji_count INTEGER NOT NULL,
         PRIMARY KEY (id),
-        FOREIGN KEY (public_channel_id) REFERENCES public_channel (id)
+        FOREIGN KEY (channel_id) REFERENCES channel (id)
     );
     CREATE TABLE IF NOT EXISTS emoji_usage (
-        public_channel_id BIGINT NOT NULL,
+        channel_id BIGINT NOT NULL,
         user_id BIGINT NOT NULL,
         emoji_id BIGINT NOT NULL,
         use_count INTEGER NOT NULL,
-        PRIMARY KEY (public_channel_id, emoji_id, user_id),
-        FOREIGN KEY (public_channel_id) REFERENCES public_channel (id),
+        PRIMARY KEY (channel_id, emoji_id, user_id),
+        FOREIGN KEY (channel_id) REFERENCES channel (id),
         FOREIGN KEY (emoji_id) REFERENCES emoji (id)
     );"#;
 

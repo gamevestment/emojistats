@@ -245,6 +245,15 @@ impl Bot {
                            channel.id);
                 }
 
+                match self.db.add_channel(&channel) {
+                    Ok(_) => {}
+                    Err(reason) => {
+                        warn!("Error adding channel {} ({}): {}",
+                              channel.name,
+                              channel.id,
+                              reason);
+                    }
+                }
                 self.public_text_channels.insert(channel.id, channel);
             }
             Channel::Private(channel) => {
@@ -385,15 +394,33 @@ impl Bot {
     }
 
     fn log_emoji_usage(&self, message: &Message) {
+        match self.db.message_exists(&message.id) {
+            Ok(message_exists) => {
+                if message_exists {
+                    return;
+                }
+            }
+            Err(reason) => {
+                warn!("Unable to determine whether message {} exists in database: {}",
+                      message.id,
+                      reason);
+                return;
+            }
+        }
+
+        let mut total_emoji_used = 0;
+
         for emoji in &self.emoji {
             let pattern = match *emoji {
                 Emoji::Custom(ref custom_emoji) => &custom_emoji.pattern,
                 Emoji::Unicode(ref emoji) => emoji,
             };
 
-            let count = message.content.matches(pattern).count() as i64;
+            let count = message.content.matches(pattern).count() as i32;
 
             if count > 0 {
+                total_emoji_used += count;
+
                 match self.db
                           .record_emoji_usage(&message.channel_id,
                                               &message.author.id,
@@ -402,6 +429,19 @@ impl Bot {
                     Ok(_) => {}
                     Err(reason) => warn!("Error recording emoji usage: {}", reason),
                 }
+            }
+        }
+
+        match self.db
+                  .record_message_stats(&message.id,
+                                        &message.channel_id,
+                                        &message.author.id,
+                                        total_emoji_used) {
+            Ok(_) => {}
+            Err(reason) => {
+                warn!("Error recording statistics for message {}: {}",
+                      message.id,
+                      reason);
             }
         }
     }
