@@ -72,7 +72,7 @@ pub fn remove_non_command_characters(s: &str) -> &str {
     while let Some(c) = s_chars.next() {
         if "abcdefghijklmnopqrstuvwxyz\
             ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-            0123456789_-"
+            0123456789_-<:!@#&"
                    .contains(c) {
             break;
         } else {

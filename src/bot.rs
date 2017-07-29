@@ -17,6 +17,7 @@ use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameTyp
 use self::time::{Timespec, get_time};
 
 const RESPONSE_STATS_ERR: &str = "Sorry! An error occurred while retrieving the statistics.";
+const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str = "Please use this command in a public channel.";
 
 #[derive(Debug)]
 pub enum BotError {
@@ -513,14 +514,16 @@ impl Bot {
                     "help" | "commands" => self.help(message),
                     "global" => self.stats_global(message),
                     "server" => self.stats_server(message),
-                    "channel" => self.stats_channel(message),
+                    "channel" => self.stats_channel(message, None),
                     "user" => self.stats_user(message, args),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
                         match arg::get_type(command) {
                             arg::Type::UserId(_user_id) => {}
-                            arg::Type::ChannelId(_channel_id) => {}
+                            arg::Type::ChannelId(channel_id) => {
+                                self.stats_channel(message, Some(channel_id));
+                            }
                             _ => {
                                 // Unknown command
                                 // Show help
@@ -695,7 +698,7 @@ impl Bot {
         };
 
         if top_emoji.len() == 0 {
-            self.send_response(message, "No Unicode emoji have been used.");
+            self.send_response(message, "I've never seen anyone use any emoji.");
         } else {
             let mut stats = String::new();
 
@@ -723,11 +726,124 @@ impl Bot {
         BotLoopDisposition::Continue
     }
 
-    fn stats_server(&self, _message: &Message) -> BotLoopDisposition {
+    fn stats_server(&self, message: &Message) -> BotLoopDisposition {
+        if self.private_channels.contains_key(&message.channel_id) {
+            self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
+            return BotLoopDisposition::Continue;
+        }
+
+        let server_id = match self.public_text_channels.get(&message.channel_id) {
+            Some(channel) => channel.server_id,
+            None => {
+                warn!("Unknown public text channel ({})", message.channel_id);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_emoji = match self.db.get_server_top_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!("Unable to retrieve top used emoji on server ({}): {}",
+                      server_id,
+                      reason);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        if top_emoji.len() == 0 {
+            self.send_response(message,
+                               "I've never seen anyone use any emoji on this server.");
+        } else {
+            let mut stats = String::new();
+
+            for (emoji, count) in top_emoji {
+                match emoji {
+                    Emoji::Custom(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji.pattern,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                    Emoji::Unicode(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+
+            let _ = self.discord
+                .send_embed(message.channel_id,
+                            &format!("<@{}>", message.author.id),
+                            |e| {
+                                e.fields(|f| {
+                                             f.field("Top used emoji on this server", &stats, false)
+                                         })
+                            });
+        }
+
         BotLoopDisposition::Continue
     }
 
-    fn stats_channel(&self, _message: &Message) -> BotLoopDisposition {
+    fn stats_channel(&self,
+                     message: &Message,
+                     channel_id: Option<ChannelId>)
+                     -> BotLoopDisposition {
+        if self.private_channels.contains_key(&message.channel_id) {
+            self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
+            return BotLoopDisposition::Continue;
+        }
+
+        let channel_id = channel_id.unwrap_or(message.channel_id);
+
+        let stats_description = match self.public_text_channels.get(&channel_id) {
+            Some(channel) => format!("Top emoji used in #{}", channel.name),
+            None => "Top emoji".to_string(),
+        };
+
+        let top_emoji = match self.db.get_channel_top_emoji(&channel_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!("Unable to retrieve top used emoji on channel ({}): {}",
+                      message.channel_id,
+                      reason);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        if top_emoji.len() == 0 {
+            self.send_response(message,
+                               "I've never seen anyone use any emoji in that channel.");
+        } else {
+            let mut stats = String::new();
+
+            for (emoji, count) in top_emoji {
+                match emoji {
+                    Emoji::Custom(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji.pattern,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                    Emoji::Unicode(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+
+            let _ = self.discord
+                .send_embed(message.channel_id,
+                            &format!("<@{}>", message.author.id),
+                            |e| e.fields(|f| f.field(&stats_description, &stats, false)));
+        }
+
         BotLoopDisposition::Continue
     }
 

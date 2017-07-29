@@ -3,7 +3,8 @@ extern crate postgres;
 
 use std::collections::HashMap;
 use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, User, UserId};
-use super::model::Emoji;
+use super::model::{Emoji, CustomEmoji};
+use postgres::rows::Rows;
 
 #[allow(dead_code)]
 pub struct Database {
@@ -171,35 +172,54 @@ impl Database {
 
     pub fn get_global_top_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_GLOBAL_EMOJI: &str = r#"
-        SELECT e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE e.is_custom_emoji = FALSE
-        GROUP BY e.name
+        GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
 
-        let mut emoji_usage = Vec::new();
-
         let result = self.conn.query(QUERY_SELECT_TOP_GLOBAL_EMOJI, &[])?;
 
-        for row in result.iter() {
-            emoji_usage.push((Emoji::Unicode(row.get::<usize, String>(0)), row.get(1)));
-        }
-
-        Ok(emoji_usage)
+        Ok(result_into_vec_emoji(result)?)
     }
 
     pub fn get_server_top_emoji(&self,
-                                _server_id: &ServerId)
+                                server_id: &ServerId)
                                 -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
+        const QUERY_SELECT_TOP_SERVER_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+            INNER JOIN channel c ON eu.channel_id = c.id
+        WHERE c.server_id = $1
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_TOP_SERVER_EMOJI, &[&(server_id.0 as i64)])?;
+
+        Ok(result_into_vec_emoji(result)?)
     }
 
     pub fn get_channel_top_emoji(&self,
-                                 _channel_id: &ChannelId)
+                                 channel_id: &ChannelId)
                                  -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
+        const QUERY_SELECT_TOP_CHANNEL_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE eu.channel_id = $1
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_TOP_CHANNEL_EMOJI, &[&(channel_id.0 as i64)])?;
+
+        Ok(result_into_vec_emoji(result)?)
     }
 
     pub fn get_user_top_emoji(&self, _user_id: &UserId) -> postgres::Result<Vec<(Emoji, i64)>> {
@@ -267,4 +287,29 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
     db_conn.batch_execute(QUERY_CREATE_TABLES)?;
 
     Ok(())
+}
+
+fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
+    // row
+    // column 0: is_custom_emoji
+    // column 1: emoji ID
+    // column 2: emoji name
+    // column 3: use count
+    let mut vec_emoji = Vec::new();
+
+    for row in result.iter() {
+        let emoji = match row.get::<usize, bool>(0) {
+            true => {
+                Emoji::Custom(CustomEmoji::new(ServerId(0),
+                                               discord::model::EmojiId(row.get::<usize, i64>(1) as
+                                                                       u64),
+                                               row.get::<usize, String>(2)))
+            }
+            false => Emoji::Unicode(row.get::<usize, String>(2)),
+        };
+
+        vec_emoji.push((emoji, row.get::<usize, i64>(3)));
+    }
+
+    Ok(vec_emoji)
 }
