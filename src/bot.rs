@@ -183,6 +183,12 @@ impl Bot {
                 Ok(Event::ChannelUpdate(channel)) => {
                     self.update_channel(channel);
                 }
+                Ok(Event::ChannelRecipientAdd(_, user)) => {
+                    self.add_user(&user);
+                }
+                Ok(Event::ServerMemberUpdate { user, .. }) => {
+                    self.add_user(&user);
+                }
                 Ok(Event::ServerEmojisUpdate(server_id, emoji_list)) => {
                     self.add_emoji_list(server_id, emoji_list);
                 }
@@ -221,6 +227,10 @@ impl Bot {
 
         for channel in &server.channels {
             self.add_channel(Channel::Public(channel.clone()));
+        }
+
+        for member in &server.members {
+            self.add_user(&member.user);
         }
 
         self.servers
@@ -341,6 +351,16 @@ impl Bot {
             }
             Channel::Private(_) => {}
             Channel::Group(_) => {}
+        }
+    }
+
+    fn add_user(&mut self, user: &User) {
+        if let Err(reason) = self.db.add_user(user) {
+            warn!("Error adding user {}#{} ({}) to database: {}",
+                  user.name,
+                  user.discriminator,
+                  user.id,
+                  reason);
         }
     }
 
@@ -825,16 +845,32 @@ impl Bot {
             None => None,
         };
 
+        let user_name = match self.db.get_user_name(user_id) {
+            Ok(maybe_user_name) => {
+                match maybe_user_name {
+                    Some(user_name) => user_name,
+                    None => "(Unknown user)".to_string(),
+                }
+            }
+            Err(reason) => {
+                debug!("Error retrieving user name for user ({}) from database: {}",
+                       user_id,
+                       reason);
+                "(Unknown user)".to_string()
+            }
+        };
+
         let stats_description = if *user_id == message.author.id {
             "Your favourite emoji".to_string()
         } else {
-            format!("<@{}>'s favourite emoji", user_id)
+            format!("{}'s favourite emoji", user_name)
         };
 
         let top_emoji = match self.db.get_user_top_emoji(&user_id, server) {
             Ok(results) => results,
             Err(reason) => {
-                warn!("Unable to retrieve top emoji used by user ({}): {}",
+                warn!("Unable to retrieve top emoji used by user {} ({}): {}",
+                      user_name,
                       user_id,
                       reason);
                 self.send_response(message, RESPONSE_STATS_ERR);

@@ -42,7 +42,20 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_user(&self, _user: &User) -> postgres::Result<()> {
+    pub fn add_user(&self, user: &User) -> postgres::Result<()> {
+        const QUERY_INSERT_USER: &str = r#"
+        INSERT INTO user_ (id, name, discriminator)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO UPDATE
+            SET name = excluded.name,
+                discriminator = excluded.discriminator;"#;
+
+        self.conn
+            .execute(QUERY_INSERT_USER,
+                     &[&(user.id.0 as i64),
+                       &user.name,
+                       &(user.discriminator as i32)])?;
+
         Ok(())
     }
 
@@ -248,7 +261,6 @@ impl Database {
 
         let result = match server_id {
             Some(server_id) => {
-                debug!("Usre {} server {}", user_id, server_id);
                 self.conn
                     .query(QUERY_SELECT_TOP_USER_SERVER_EMOJI,
                            &[&(user_id.0 as i64), &(server_id.0 as i64)])?
@@ -286,6 +298,25 @@ impl Database {
                                       -> postgres::Result<Vec<(Emoji, i64)>> {
         Ok(Vec::new())
     }
+
+    pub fn get_user_name(&self, user_id: &UserId) -> postgres::Result<Option<String>> {
+        const QUERY_SELECT_USER: &str = r#"
+        SELECT u.name, u.discriminator
+        FROM user_ u
+        WHERE u.id = $1;"#;
+
+        let result = self.conn.query(QUERY_SELECT_USER, &[&(user_id.0 as i64)])?;
+
+        if result.len() == 0 {
+            Ok(None)
+        } else {
+            let row = result.get(0);
+
+            Ok(Some(format!("{}#{:04}",
+                            row.get::<usize, String>(0),
+                            row.get::<usize, i32>(1))))
+        }
+    }
 }
 
 fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
@@ -301,6 +332,12 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         id BIGINT NOT NULL,
         server_id BIGINT NOT NULL,
         name VARCHAR(512),
+        PRIMARY KEY (id)
+    );
+    CREATE TABLE IF NOT EXISTS user_ (
+        id BIGINT NOT NULL,
+        name VARCHAR(512),
+        discriminator INTEGER,
         PRIMARY KEY (id)
     );
     CREATE TABLE IF NOT EXISTS message (
