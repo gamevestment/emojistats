@@ -128,7 +128,7 @@ impl Bot {
     pub fn add_unicode_emoji(&mut self, emoji: String) {
         let emoji = Emoji::Unicode(emoji);
 
-        match self.db.add_emoji(&emoji) {
+        match self.db.add_emoji(&emoji, None) {
             Ok(_) => {}
             Err(reason) => {
                 warn!("Error adding Unicode emoji <{:?}> to database: {}",
@@ -281,6 +281,12 @@ impl Bot {
                            channel.id);
                 }
 
+                if let Err(reason) = self.db.add_channel(&channel) {
+                    warn!("Error adding channel ({}) to database: {}",
+                          channel.id,
+                          reason);
+                }
+
                 self.public_text_channels.insert(channel.id, channel);
             }
             Channel::Private(channel) => {
@@ -367,7 +373,7 @@ impl Bot {
         for emoji in emoji_list {
             let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
 
-            match self.db.add_emoji(&custom_emoji) {
+            match self.db.add_emoji(&custom_emoji, Some(&server_id)) {
                 Ok(_) => {
                     debug!("Added custom emoji on server ({}): <{:?}>",
                            server_id,
@@ -515,14 +521,16 @@ impl Bot {
                     "global" => self.stats_global(message),
                     "server" => self.stats_server(message),
                     "channel" => self.stats_channel(message, None),
-                    "user" => self.stats_user(message, args),
+                    "me" => self.stats_user(message, None),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
                         match arg::get_type(command) {
-                            arg::Type::UserId(_user_id) => {}
+                            arg::Type::UserId(user_id) => {
+                                self.stats_user(message, Some(&user_id));
+                            }
                             arg::Type::ChannelId(channel_id) => {
-                                self.stats_channel(message, Some(channel_id));
+                                self.stats_channel(message, Some(&channel_id));
                             }
                             _ => {
                                 // Unknown command
@@ -790,14 +798,14 @@ impl Bot {
 
     fn stats_channel(&self,
                      message: &Message,
-                     channel_id: Option<ChannelId>)
+                     channel_id: Option<&ChannelId>)
                      -> BotLoopDisposition {
         if self.private_channels.contains_key(&message.channel_id) {
             self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
             return BotLoopDisposition::Continue;
         }
 
-        let channel_id = channel_id.unwrap_or(message.channel_id);
+        let channel_id = channel_id.unwrap_or(&message.channel_id);
 
         let stats_description = match self.public_text_channels.get(&channel_id) {
             Some(channel) => format!("Top emoji used in #{}", channel.name),
@@ -847,7 +855,68 @@ impl Bot {
         BotLoopDisposition::Continue
     }
 
-    fn stats_user(&self, _message: &Message, _args: &str) -> BotLoopDisposition {
+    fn stats_user(&self, message: &Message, user_id: Option<&UserId>) -> BotLoopDisposition {
+        let user_id = user_id.unwrap_or(&message.author.id);
+
+        if *user_id == self.bot_user_id {
+            self.send_response(message, "You're so silly!");
+            return BotLoopDisposition::Continue;
+        }
+
+        // If the bot knows which server is associated with the public text channel, get statistics
+        // for both Unicode emoji and custom emoji on the same server
+        // Otherwise, just get statistics for Unicode emoji
+        let server = match self.public_text_channels.get(&message.channel_id) {
+            Some(channel) => Some(&channel.server_id),
+            None => None,
+        };
+
+        let stats_description = if *user_id == message.author.id {
+            "Your favourite emoji".to_string()
+        } else {
+            format!("<@{}>'s favourite emoji", user_id)
+        };
+
+        let top_emoji = match self.db.get_user_top_emoji(&user_id, server) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!("Unable to retrieve top emoji used by user ({}): {}",
+                      user_id,
+                      reason);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        if top_emoji.len() == 0 {
+            self.send_response(message,
+                               &format!("I've never seen <@{}> use any emoji.", user_id));
+        } else {
+            let mut stats = String::new();
+
+            for (emoji, count) in top_emoji {
+                match emoji {
+                    Emoji::Custom(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji.pattern,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                    Emoji::Unicode(emoji) => {
+                        stats += &format!("{} used {} time{}\n",
+                                emoji,
+                                count,
+                                if count == 1 { "" } else { "s" });
+                    }
+                }
+            }
+
+            let _ = self.discord
+                .send_embed(message.channel_id,
+                            &format!("<@{}>", message.author.id),
+                            |e| e.fields(|f| f.field(&stats_description, &stats, false)));
+        }
+
         BotLoopDisposition::Continue
     }
 

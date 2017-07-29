@@ -46,22 +46,24 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_emoji(&self, emoji: &Emoji) -> postgres::Result<()> {
+    pub fn add_emoji(&self, emoji: &Emoji, server_id: Option<&ServerId>) -> postgres::Result<()> {
         const QUERY_INSERT_CUSTOM_EMOJI: &str = r#"
-        INSERT INTO emoji (id, name, is_custom_emoji)
-        VALUES ($1, $2, TRUE)
+        INSERT INTO emoji (server_id, id, name, is_custom_emoji)
+        VALUES ($1, $2, $3, TRUE)
         ON CONFLICT (id) DO UPDATE
             SET name = excluded.name;"#;
 
         const QUERY_INSERT_UNICODE_EMOJI: &str = r#"
-        INSERT INTO emoji (name, is_custom_emoji)
-        VALUES ($1, FALSE);"#;
+        INSERT INTO emoji (server_id, name, is_custom_emoji)
+        VALUES (NULL, $1, FALSE);"#;
 
         match *emoji {
             Emoji::Custom(ref emoji) => {
                 self.conn
                     .execute(QUERY_INSERT_CUSTOM_EMOJI,
-                             &[&(emoji.id.0 as i64), &emoji.name])?;
+                             &[&(server_id.unwrap().0 as i64),
+                               &(emoji.id.0 as i64),
+                               &emoji.name])?;
             }
             Emoji::Unicode(ref emoji) => {
                 // Only insert Unicode emoji if they aren't already in the database
@@ -222,8 +224,42 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
-    pub fn get_user_top_emoji(&self, _user_id: &UserId) -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
+    pub fn get_user_top_emoji(&self,
+                              user_id: &UserId,
+                              server_id: Option<&ServerId>)
+                              -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_TOP_USER_UNICODE_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE e.is_custom_emoji = FALSE AND eu.user_id = $1
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        const QUERY_SELECT_TOP_USER_SERVER_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE (eu.user_id = $1) AND (e.server_id IS NULL OR e.server_id = $2)
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let result = match server_id {
+            Some(server_id) => {
+                debug!("Usre {} server {}", user_id, server_id);
+                self.conn
+                    .query(QUERY_SELECT_TOP_USER_SERVER_EMOJI,
+                           &[&(user_id.0 as i64), &(server_id.0 as i64)])?
+            }
+            None => {
+                self.conn
+                    .query(QUERY_SELECT_TOP_USER_UNICODE_EMOJI, &[&(user_id.0 as i64)])?
+            }
+        };
+
+        Ok(result_into_vec_emoji(result)?)
     }
 
     pub fn get_server_top_users(&self,
@@ -255,6 +291,7 @@ impl Database {
 fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
     const QUERY_CREATE_TABLES: &str = r#"
     CREATE TABLE IF NOT EXISTS emoji (
+        server_id BIGINT NULL,
         id BIGSERIAL NOT NULL,
         name VARCHAR(512) NOT NULL,
         is_custom_emoji BOOL NOT NULL,
