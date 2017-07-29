@@ -1,6 +1,7 @@
 [config]
 bot_token = ""
 bot_admin_password = ""
+feedback_filename = "emojistats-feedback.log"
 
 [database]
 hostname = "localhost"

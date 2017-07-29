@@ -2,7 +2,33 @@ extern crate discord;
 
 use arg;
 use self::discord::Discord;
-use self::discord::model::{ChannelId, Message};
+use self::discord::model::{ChannelId, LiveServer, Message, ServerId, ServerInfo};
+
+pub struct BasicServerInfo {
+    pub id: ServerId,
+    pub name: String,
+    pub icon: Option<String>,
+}
+
+impl From<LiveServer> for BasicServerInfo {
+    fn from(live_server: LiveServer) -> Self {
+        BasicServerInfo {
+            id: live_server.id,
+            name: live_server.name,
+            icon: live_server.icon,
+        }
+    }
+}
+
+impl From<ServerInfo> for BasicServerInfo {
+    fn from(server_info: ServerInfo) -> Self {
+        BasicServerInfo {
+            id: server_info.id,
+            name: server_info.name,
+            icon: server_info.icon,
+        }
+    }
+}
 
 pub trait MessageRecipient {
     fn send_message(&self, discord: &Discord, message: &str);

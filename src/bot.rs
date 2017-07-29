@@ -4,14 +4,16 @@ extern crate chrono_humanize;
 
 use arg;
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use bot_utility::{extract_preceding_arg, remove_non_command_characters, extract_first_word,
-                  MessageRecipient};
+                  BasicServerInfo, MessageRecipient};
 use emojistats::{CustomEmoji, Database, Emoji};
 
 use self::chrono_humanize::HumanTime;
-use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, Message,
-                           MessageType, OnlineStatus, PossibleServer, PublicChannel, Server,
-                           ServerId, ServerInfo, UserId};
+use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, LiveServer,
+                           Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
+                           PublicChannel, Server, ServerId, ServerInfo, User, UserId};
 use self::time::{Timespec, get_time};
 
 const RESPONSE_STATS_ERR: &str = "Sorry! An error occurred while retrieving the statistics.";
@@ -41,10 +43,11 @@ pub struct Bot {
     online_since: Timespec,
     bot_user_id: UserId,
     bot_admin_password: String,
-    bot_admins: HashSet<UserId>,
-    servers: HashMap<ServerId, ServerInfo>,
+    bot_admins: HashMap<UserId, User>,
+    feedback_file: Option<File>,
+    servers: HashMap<ServerId, BasicServerInfo>,
     public_text_channels: HashMap<ChannelId, PublicChannel>,
-    private_channels: HashSet<ChannelId>,
+    private_channels: HashMap<ChannelId, PrivateChannel>,
     unknown_public_text_channels: HashSet<ChannelId>,
     db: Database,
     emoji: HashSet<Emoji>,
@@ -72,14 +75,14 @@ impl Bot {
         let bot_user_id = ready_event.user.id;
         let bot_admin_password = bot_admin_password.to_string();
 
-        let mut bot_admins = HashSet::new();
+        let mut bot_admins = HashMap::new();
         match discord.get_application_info() {
             Ok(application_info) => {
-                bot_admins.insert(application_info.owner.id);
                 debug!("Application owner = {}#{} ({})",
                        application_info.owner.name,
                        application_info.owner.discriminator,
                        application_info.owner.id);
+                bot_admins.insert(application_info.owner.id, application_info.owner);
             }
             Err(_) => {
                 debug!("No application info available");
@@ -93,13 +96,32 @@ impl Bot {
                bot_user_id,
                bot_admin_password,
                bot_admins,
+               feedback_file: None,
                servers: HashMap::new(),
                public_text_channels: HashMap::new(),
-               private_channels: HashSet::new(),
+               private_channels: HashMap::new(),
                unknown_public_text_channels: HashSet::new(),
                db,
                emoji: HashSet::new(),
            })
+    }
+
+    pub fn set_feedback_file<S>(&mut self, filename: S)
+        where S: Into<String>
+    {
+        let filename = filename.into();
+
+        match OpenOptions::new().append(true).create(true).open(&filename) {
+            Ok(file) => {
+                self.feedback_file = Some(file);
+                info!("Logging feedback to file: <{}>", filename);
+            }
+            Err(reason) => {
+                warn!("Unable to open file for logging feedback <{}>: {}",
+                      filename,
+                      reason);
+            }
+        }
     }
 
     pub fn add_unicode_emoji(&mut self, emoji: String) {
@@ -123,8 +145,6 @@ impl Bot {
 
         let mut bot_loop_disposition = BotLoopDisposition::Continue;
 
-        self.refresh_servers();
-
         // Main loop
         let bot_disposition = loop {
             match self.discord_conn.recv_event() {
@@ -132,11 +152,10 @@ impl Bot {
                     bot_loop_disposition = self.process_message(message);
                 }
                 Ok(Event::ServerCreate(server)) => {
-                    // Don't call refresh_servers() - when the bot is starting up, this will spam
-                    // Discord because on startup, an event is generated for every server
                     match server {
                         PossibleServer::Online(server) => {
-                            self.add_emoji_list(server.id, server.emojis);
+                            self.add_emoji_list(server.id, server.emojis.clone());
+                            self.add_live_server(server);
                         }
                         PossibleServer::Offline(_) => {}
                     }
@@ -184,15 +203,30 @@ impl Bot {
         bot_disposition
     }
 
-    fn refresh_servers(&mut self) {
+    fn check_for_new_servers(&mut self) {
         if let Ok(servers) = self.discord.get_servers() {
-            for server in servers {
-                self.add_server(server);
+            for server_info in servers {
+                if !self.servers.contains_key(&server_info.id) {
+                    self.add_server_info(server_info);
+                }
             }
         }
     }
 
-    fn add_server(&mut self, server: ServerInfo) {
+    fn add_live_server(&mut self, server: LiveServer) {
+        if !self.servers.contains_key(&server.id) {
+            debug!("Adding new server {} ({})", server.name, server.id);
+        }
+
+        for channel in &server.channels {
+            self.add_channel(Channel::Public(channel.clone()));
+        }
+
+        self.servers
+            .insert(server.id, BasicServerInfo::from(server));
+    }
+
+    fn add_server_info(&mut self, server: ServerInfo) {
         if !self.servers.contains_key(&server.id) {
             debug!("Adding new server {} ({})", server.name, server.id);
         }
@@ -203,7 +237,8 @@ impl Bot {
             }
         }
 
-        self.servers.insert(server.id, server);
+        self.servers
+            .insert(server.id, BasicServerInfo::from(server));
     }
 
     fn remove_server_id(&mut self, server_id: &ServerId) {
@@ -230,8 +265,6 @@ impl Bot {
             server.icon = new_server_info.icon;
             return;
         }
-
-        self.refresh_servers();
     }
 
     fn add_channel(&mut self, channel: Channel) {
@@ -247,26 +280,17 @@ impl Bot {
                            channel.id);
                 }
 
-                match self.db.add_channel(&channel) {
-                    Ok(_) => {}
-                    Err(reason) => {
-                        warn!("Error adding channel {} ({}): {}",
-                              channel.name,
-                              channel.id,
-                              reason);
-                    }
-                }
                 self.public_text_channels.insert(channel.id, channel);
             }
             Channel::Private(channel) => {
-                if !self.private_channels.contains(&channel.id) {
+                if !self.private_channels.contains_key(&channel.id) {
                     debug!("Adding new private channel with {}#{} ({})",
                            channel.recipient.name,
                            channel.recipient.discriminator,
                            channel.id);
                 }
 
-                self.private_channels.insert(channel.id);
+                self.private_channels.insert(channel.id, channel);
             }
             Channel::Group(_) => {}
         }
@@ -313,6 +337,31 @@ impl Bot {
         }
     }
 
+    fn resolve_unknown_channel(&mut self, channel_id: &ChannelId) {
+        // Get an updated list of servers
+        if let Ok(servers) = self.discord.get_servers() {
+            let mut new_servers = HashSet::new();
+
+            for server_info in &servers {
+                // If this is a new server ID, add the information for the server
+                if !self.servers.contains_key(&server_info.id) {
+                    new_servers.insert(server_info.id);
+                    self.add_server_info(server_info.clone());
+                }
+            }
+
+            // If the channel ID is still unknown,
+            if !self.public_text_channels.contains_key(channel_id) {
+                // get updated data on all servers the bot already knew about
+                for server_info in servers {
+                    if !new_servers.contains(&server_info.id) {
+                        self.add_server_info(server_info);
+                    }
+                }
+            }
+        }
+    }
+
     fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
         for emoji in emoji_list {
             let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
@@ -353,10 +402,10 @@ impl Bot {
         // If the channel is still unknown after refreshing the server list, add it to a list of
         //     "unknown channels" so that we don't keep trying to get information on it
         if !self.public_text_channels.contains_key(&message.channel_id) &&
-           !self.private_channels.contains(&message.channel_id) &&
+           !self.private_channels.contains_key(&message.channel_id) &&
            !self.unknown_public_text_channels
                 .contains(&message.channel_id) {
-            self.refresh_servers();
+            self.resolve_unknown_channel(&message.channel_id);
 
             if !self.public_text_channels.contains_key(&message.channel_id) {
                 self.unknown_public_text_channels.insert(message.channel_id);
@@ -386,7 +435,7 @@ impl Bot {
         }
 
         // If the message was sent in a private channel to the bot, the entire message is a command
-        if self.private_channels.contains(&message.channel_id) {
+        if self.private_channels.contains_key(&message.channel_id) {
             return self.process_command(&message, &message.content);
         }
 
@@ -459,6 +508,7 @@ impl Bot {
                     "botinfo" => self.bot_info(message),
                     "quit" => self.quit(message),
                     "restart" => self.restart(message),
+                    "feedback" => self.feedback(message, args),
                     "about" | "info" => self.about(message),
                     "help" | "commands" => self.help(message),
                     "global" => self.stats_global(message),
@@ -494,17 +544,18 @@ impl Bot {
     }
 
     fn attempt_auth(&mut self, message: &Message, password_attempt: &str) -> BotLoopDisposition {
-        if self.bot_admins.contains(&message.author.id) {
+        if self.bot_admins.contains_key(&message.author.id) {
             self.send_response(message,
                                "You are already authenticated as a bot administrator.");
-        } else if !self.private_channels.contains(&message.channel_id) {
+        } else if !self.private_channels.contains_key(&message.channel_id) {
             self.send_response(message, "Please use this command in a private message.");
         } else {
             if password_attempt.is_empty() {
                 self.send_response(message, "Please enter the bot administration password.");
             } else if password_attempt == self.bot_admin_password {
                 self.send_response(message, "Authenticated successfully.");
-                self.bot_admins.insert(message.author.id);
+                self.bot_admins
+                    .insert(message.author.id, message.author.clone());
             } else {
                 self.send_response(message, "Unable to authenticate.");
             }
@@ -514,8 +565,8 @@ impl Bot {
     }
 
     fn bot_info(&mut self, message: &Message) -> BotLoopDisposition {
-        if self.bot_admins.contains(&message.author.id) {
-            self.refresh_servers();
+        if self.bot_admins.contains_key(&message.author.id) {
+            self.check_for_new_servers();
 
             let online_time = HumanTime::from(self.online_since - get_time());
 
@@ -542,7 +593,7 @@ impl Bot {
     }
 
     fn quit(&self, message: &Message) -> BotLoopDisposition {
-        if self.bot_admins.contains(&message.author.id) {
+        if self.bot_admins.contains_key(&message.author.id) {
             self.send_response(message, "Quitting.");
             info!("Quit command issued by {}.", message.author.name);
             BotLoopDisposition::Quit
@@ -553,7 +604,7 @@ impl Bot {
     }
 
     fn restart(&self, message: &Message) -> BotLoopDisposition {
-        if self.bot_admins.contains(&message.author.id) {
+        if self.bot_admins.contains_key(&message.author.id) {
             self.send_response(message, "Restarting.");
             info!("Restart command issued by {}.", message.author.name);
             BotLoopDisposition::Restart
@@ -561,6 +612,68 @@ impl Bot {
             self.respond_auth_required(message);
             BotLoopDisposition::Continue
         }
+    }
+
+    fn feedback(&self, message: &Message, feedback: &str) -> BotLoopDisposition {
+        self.send_response(message, "Thanks. Your feedback has been logged for review.");
+
+        // Write the feedback to log files
+        // If the the feedback spans multiple lines, indent the subsequent lines
+        let log_feedback =
+            feedback.replace("\n",
+                             &format!("\n              {}#{}> ",
+                                     message.author.name,
+                                     message.author.discriminator));
+
+        let log_feedback = format!("Feedback from {}#{}: {}\n",
+                                   message.author.name,
+                                   message.author.discriminator,
+                                   log_feedback);
+        info!("{}", log_feedback);
+
+        if self.feedback_file.is_some() {
+            match self.feedback_file
+                      .as_ref()
+                      .unwrap()
+                      .write(log_feedback.as_bytes()) {
+                Ok(_) => {}
+                Err(reason) => {
+                    warn!("Error writing feedback \"{}\" to log: {}", feedback, reason);
+                }
+            }
+        }
+
+        // Send the feedback to administrators
+        let feedback = format!("Feedback from {}#{}:\n```\n{}```",
+                               message.author.name,
+                               message.author.discriminator,
+                               feedback);
+
+        for (user_id, user) in &self.bot_admins {
+            let mut num_channels_sent_to = 0;
+
+            // Look for an existing private channel for each administrator
+            for (channel_id, _) in self.private_channels
+                    .iter()
+                    .filter(|&(_, c)| c.recipient.id == *user_id) {
+                num_channels_sent_to += 1;
+                self.send_message(channel_id, &feedback);
+            }
+
+            // If there wasn't an existing private channel, create one
+            if num_channels_sent_to == 0 {
+                if let Ok(private_channel) = self.discord.create_private_channel(*user_id) {
+                    self.send_message(&private_channel.id, &feedback);
+                } else {
+                    warn!("Unable to create private channel to send feedback to bot administrator \
+                          {}#{}.",
+                          user.name,
+                          user.discriminator);
+                }
+            }
+        }
+
+        BotLoopDisposition::Continue
     }
 
     fn about(&self, _message: &Message) -> BotLoopDisposition {

@@ -184,6 +184,9 @@ fn main() {
     info!("Connected to Discord successfully");
 
     // Perform other setup tasks
+    if let Ok(feedback_filename) = config.get_str("config.feedback_filename") {
+        bot.set_feedback_file(feedback_filename);
+    }
     load_unicode_emoji(&config, &mut bot);
 
     // Begin event loop
