@@ -275,28 +275,40 @@ impl Database {
     }
 
     pub fn get_server_top_users(&self,
-                                _server_id: &ServerId)
-                                -> postgres::Result<Vec<(UserId, i64)>> {
-        Ok(Vec::new())
+                                server_id: &ServerId)
+                                -> postgres::Result<Vec<(String, i64)>> {
+        const QUERY_SELECT_TOP_SERVER_USERS: &str = r#"
+        SELECT u.name, u.discriminator, SUM(m.emoji_count)
+        FROM message m
+            INNER JOIN user_ u ON m.user_id = u.id
+            INNER JOIN channel c ON m.channel_id = c.id
+        WHERE c.server_id = $1
+        GROUP BY u.name, u.discriminator
+        ORDER BY SUM(m.emoji_count) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_TOP_SERVER_USERS, &[&(server_id.0 as i64)])?;
+
+        Ok(result_into_vec_users(result)?)
     }
 
     pub fn get_channel_top_users(&self,
-                                 _channel_id: &ChannelId)
-                                 -> postgres::Result<Vec<(UserId, i64)>> {
-        Ok(Vec::new())
-    }
+                                 channel_id: &ChannelId)
+                                 -> postgres::Result<Vec<(String, i64)>> {
+        const QUERY_SELECT_TOP_CHANNEL_USERS: &str = r#"
+        SELECT u.name, u.discriminator, SUM(m.emoji_count)
+        FROM message m
+            INNER JOIN user_ u ON m.user_id = u.id
+        WHERE m.channel_id = $1
+        GROUP BY u.name, u.discriminator
+        ORDER BY SUM(m.emoji_count) DESC
+        LIMIT 5;"#;
 
-    pub fn get_user_fav_emoji(&self,
-                              _user_id: &UserId,
-                              _server_id: &ServerId)
-                              -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
-    }
+        let result = self.conn
+            .query(QUERY_SELECT_TOP_CHANNEL_USERS, &[&(channel_id.0 as i64)])?;
 
-    pub fn get_user_fav_unicode_emoji(&self,
-                                      _user_id: &UserId)
-                                      -> postgres::Result<Vec<(Emoji, i64)>> {
-        Ok(Vec::new())
+        Ok(result_into_vec_users(result)?)
     }
 
     pub fn get_user_name(&self, user_id: &UserId) -> postgres::Result<Option<String>> {
@@ -312,9 +324,7 @@ impl Database {
         } else {
             let row = result.get(0);
 
-            Ok(Some(format!("{}#{:04}",
-                            row.get::<usize, String>(0),
-                            row.get::<usize, i32>(1))))
+            Ok(Some(format!("{}", row.get::<usize, String>(0))))
         }
     }
 }
@@ -383,6 +393,23 @@ fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
         };
 
         vec_emoji.push((emoji, row.get::<usize, i64>(3)));
+    }
+
+    Ok(vec_emoji)
+}
+
+
+fn result_into_vec_users(result: Rows) -> postgres::Result<Vec<(String, i64)>> {
+    // row
+    // column 0: user name
+    // column 1: user discriminator
+    // column 2: number of emoji used
+    let mut vec_emoji = Vec::new();
+
+    for row in result.iter() {
+        let name = format!("{}", row.get::<usize, String>(0));
+
+        vec_emoji.push((name, row.get::<usize, i64>(2)));
     }
 
     Ok(vec_emoji)

@@ -772,15 +772,30 @@ impl Bot {
             self.send_response(message,
                                "I've never seen anyone use any emoji on this server.");
         } else {
-            let stats = create_emoji_usage_line(top_emoji);
+            let top_users = match self.db.get_server_top_users(&server_id) {
+                Ok(results) => results,
+                Err(reason) => {
+                    warn!("Unable to retrieve top users on server ({}): {}",
+                          server_id,
+                          reason);
+                    self.send_response(message, RESPONSE_STATS_ERR);
+                    return BotLoopDisposition::Continue;
+                }
+            };
+
+            let user_stats = create_top_users_line(top_users);
+
+            let emoji_stats = create_emoji_usage_line(top_emoji);
 
             let _ = self.discord
                 .send_embed(message.channel_id,
                             &format!("<@{}>", message.author.id),
                             |e| {
-                                e.fields(|f| {
-                                             f.field("Top used emoji on this server", &stats, false)
-                                         })
+                                e.title("Statistics for this server")
+                                    .fields(|f| {
+                                                f.field("Top emoji", &emoji_stats, true)
+                                                    .field("Top users", &user_stats, true)
+                                            })
                             });
         }
 
@@ -799,8 +814,8 @@ impl Bot {
         let channel_id = channel_id.unwrap_or(&message.channel_id);
 
         let stats_description = match self.public_text_channels.get(&channel_id) {
-            Some(channel) => format!("Top emoji used in #{}", channel.name),
-            None => "Top emoji".to_string(),
+            Some(channel) => format!("Statistics for #{}", channel.name),
+            None => "Channel statistics".to_string(),
         };
 
         let top_emoji = match self.db.get_channel_top_emoji(&channel_id) {
@@ -818,12 +833,31 @@ impl Bot {
             self.send_response(message,
                                "I've never seen anyone use any emoji in that channel.");
         } else {
-            let stats = create_emoji_usage_line(top_emoji);
+            let top_users = match self.db.get_channel_top_users(&channel_id) {
+                Ok(results) => results,
+                Err(reason) => {
+                    warn!("Unable to retrieve top users in channel ({}): {}",
+                          channel_id,
+                          reason);
+                    self.send_response(message, RESPONSE_STATS_ERR);
+                    return BotLoopDisposition::Continue;
+                }
+            };
+
+            let user_stats = create_top_users_line(top_users);
+
+            let emoji_stats = create_emoji_usage_line(top_emoji);
 
             let _ = self.discord
                 .send_embed(message.channel_id,
                             &format!("<@{}>", message.author.id),
-                            |e| e.fields(|f| f.field(&stats_description, &stats, false)));
+                            |e| {
+                                e.title(&stats_description)
+                                    .fields(|f| {
+                                                f.field("Top emoji", &emoji_stats, true)
+                                                    .field("Top users", &user_stats, true)
+                                            })
+                            });
         }
 
         BotLoopDisposition::Continue
@@ -916,6 +950,16 @@ fn create_emoji_usage_line(emoji_usage: Vec<(Emoji, i64)>) -> String {
                         if count == 1 { "" } else { "s" });
             }
         }
+    }
+
+    stats
+}
+
+fn create_top_users_line(emoji_usage: Vec<(String, i64)>) -> String {
+    let mut stats = String::new();
+
+    for (user_name, count) in emoji_usage {
+        stats += &format!("{} used {} emoji\n", user_name, count)
     }
 
     stats
