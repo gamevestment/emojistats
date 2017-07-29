@@ -14,6 +14,7 @@ use std::env::args;
 use std::ffi::CString;
 use std::process;
 use nix::unistd::execv;
+use log4rs::config::Logger;
 use emojistats::Database;
 use bot::BotDisposition;
 
@@ -49,12 +50,19 @@ fn init_logging() {
     let file_appender = log4rs::config::Appender::builder().build("file", Box::new(file));
 
     // Put everything together
-    let root = log4rs::config::Root::builder()
-        .appender("file")
-        .build(log_level_filter);
     let config = log4rs::config::Config::builder()
         .appender(file_appender)
-        .build(root)
+        // No need to obtain debug detail for postgres
+        .logger(Logger::builder()
+                    .appender("file")
+                    .build("postgres", log::LogLevelFilter::Info))
+        .logger(Logger::builder()
+                    .appender("file")
+                    .build("discord", log_level_filter))
+        .logger(Logger::builder()
+                    .appender("file")
+                    .build(PROGRAM_NAME, log_level_filter))
+        .build(log4rs::config::Root::builder().build(log::LogLevelFilter::Off))
         .expect("Failed to build logging configuration");
 
     log4rs::init_config(config).expect("Failed to initialize log4rs");
