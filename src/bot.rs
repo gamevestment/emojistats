@@ -708,19 +708,7 @@ impl Bot {
         if top_emoji.len() == 0 {
             self.send_response(message, "I've never seen anyone use any emoji.");
         } else {
-            let mut stats = String::new();
-
-            for (emoji, count) in top_emoji {
-                match emoji {
-                    Emoji::Custom(_) => {}
-                    Emoji::Unicode(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                }
-            }
+            let stats = create_emoji_usage_line(top_emoji);
 
             let _ =
                 self.discord
@@ -764,24 +752,7 @@ impl Bot {
             self.send_response(message,
                                "I've never seen anyone use any emoji on this server.");
         } else {
-            let mut stats = String::new();
-
-            for (emoji, count) in top_emoji {
-                match emoji {
-                    Emoji::Custom(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji.pattern,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                    Emoji::Unicode(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                }
-            }
+            let stats = create_emoji_usage_line(top_emoji);
 
             let _ = self.discord
                 .send_embed(message.channel_id,
@@ -827,24 +798,7 @@ impl Bot {
             self.send_response(message,
                                "I've never seen anyone use any emoji in that channel.");
         } else {
-            let mut stats = String::new();
-
-            for (emoji, count) in top_emoji {
-                match emoji {
-                    Emoji::Custom(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji.pattern,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                    Emoji::Unicode(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                }
-            }
+            let stats = create_emoji_usage_line(top_emoji);
 
             let _ = self.discord
                 .send_embed(message.channel_id,
@@ -892,24 +846,7 @@ impl Bot {
             self.send_response(message,
                                &format!("I've never seen <@{}> use any emoji.", user_id));
         } else {
-            let mut stats = String::new();
-
-            for (emoji, count) in top_emoji {
-                match emoji {
-                    Emoji::Custom(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji.pattern,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                    Emoji::Unicode(emoji) => {
-                        stats += &format!("{} used {} time{}\n",
-                                emoji,
-                                count,
-                                if count == 1 { "" } else { "s" });
-                    }
-                }
-            }
+            let stats = create_emoji_usage_line(top_emoji);
 
             let _ = self.discord
                 .send_embed(message.channel_id,
@@ -923,4 +860,27 @@ impl Bot {
     fn respond_auth_required(&self, message: &Message) {
         self.send_response(message, "Please authenticate first.");
     }
+}
+
+fn create_emoji_usage_line(emoji_usage: Vec<(Emoji, i64)>) -> String {
+    let mut stats = String::new();
+
+    for (emoji, count) in emoji_usage {
+        match emoji {
+            Emoji::Custom(emoji) => {
+                stats += &format!("{} used {} time{}\n",
+                        emoji.pattern,
+                        count,
+                        if count == 1 { "" } else { "s" });
+            }
+            Emoji::Unicode(emoji) => {
+                stats += &format!("{} used {} time{}\n",
+                        emoji,
+                        count,
+                        if count == 1 { "" } else { "s" });
+            }
+        }
+    }
+
+    stats
 }
