@@ -1,7 +1,6 @@
 extern crate discord;
 extern crate postgres;
 
-use std::collections::HashMap;
 use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, User, UserId};
 use super::model::{Emoji, CustomEmoji};
 use postgres::rows::Rows;
@@ -9,7 +8,6 @@ use postgres::rows::Rows;
 #[allow(dead_code)]
 pub struct Database {
     conn: postgres::Connection,
-    unicode_emoji_ids: HashMap<String, i64>,
 }
 
 #[allow(dead_code)]
@@ -20,10 +18,7 @@ impl Database {
         let conn = postgres::Connection::connect(params, postgres::TlsMode::None)?;
         create_tables(&conn)?;
 
-        Ok(Database {
-               conn,
-               unicode_emoji_ids: HashMap::new(),
-           })
+        Ok(Database { conn })
     }
 
     pub fn add_channel(&self, channel: &PublicChannel) -> postgres::Result<()> {
