@@ -1,6 +1,6 @@
 [root]
 name = "emojistats"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono-humanize 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "config 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
