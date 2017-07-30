@@ -45,6 +45,8 @@ pub struct Bot {
     bot_user_id: UserId,
     bot_admin_password: String,
     bot_admins: HashMap<UserId, User>,
+    about_text: Option<String>,
+    help_text: Option<String>,
     feedback_file: Option<File>,
     servers: HashMap<ServerId, BasicServerInfo>,
     public_text_channels: HashMap<ChannelId, PublicChannel>,
@@ -97,6 +99,8 @@ impl Bot {
                bot_user_id,
                bot_admin_password,
                bot_admins,
+               about_text: None,
+               help_text: None,
                feedback_file: None,
                servers: HashMap::new(),
                public_text_channels: HashMap::new(),
@@ -105,6 +109,18 @@ impl Bot {
                db,
                emoji: HashSet::new(),
            })
+    }
+
+    pub fn set_about_text<S>(&mut self, text: S)
+        where S: Into<String>
+    {
+        self.about_text = Some(text.into());
+    }
+
+    pub fn set_help_text<S>(&mut self, text: S)
+        where S: Into<String>
+    {
+        self.help_text = Some(text.into());
     }
 
     pub fn set_feedback_file<S>(&mut self, filename: S)
@@ -538,11 +554,13 @@ impl Bot {
                     "feedback" => self.feedback(message, args),
                     "about" | "info" => self.about(message),
                     "help" | "commands" => self.help(message),
-                    "global" => self.stats_global(message),
-                    "server" => self.stats_server(message),
-                    "channel" => self.stats_channel(message, None),
-                    "me" => self.stats_user(message, None),
+                    "g" | "global" => self.stats_global(message),
+                    "s" | "server" => self.stats_server(message),
+                    "c" | "channel" => self.stats_channel(message, None),
+                    "m" | "me" => self.stats_user(message, None),
                     _ => {
+                        debug!("{}", command);
+
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
                         match arg::get_type(command) {
@@ -552,9 +570,26 @@ impl Bot {
                             arg::Type::ChannelId(channel_id) => {
                                 self.stats_channel(message, Some(&channel_id));
                             }
+                            arg::Type::EmojiId(emoji_id) => {
+                                // TODO: Show usage for this emoji
+                                self.send_response(message, "Yes! That is an emoji!");
+                            }
                             _ => {
-                                // Unknown command
-                                // Show help
+                                let matches = self.emoji
+                                    .iter()
+                                    .filter(|e| match **e {
+                                                Emoji::Custom(ref emoji) => {
+                                                    emoji.pattern == command
+                                                }
+                                                Emoji::Unicode(ref emoji) => emoji == command,
+                                            });
+
+                                if matches.count() == 0 {
+                                    self.help(message);
+                                } else {
+                                    // TODO: Show usage for this emoji
+                                    self.send_response(message, "Yes! That is an emoji!");
+                                }
                             }
                         }
 
@@ -707,11 +742,19 @@ impl Bot {
         BotLoopDisposition::Continue
     }
 
-    fn about(&self, _message: &Message) -> BotLoopDisposition {
+    fn about(&self, message: &Message) -> BotLoopDisposition {
+        if self.about_text.is_some() {
+            self.send_response(message, self.about_text.as_ref().unwrap());
+        }
+
         BotLoopDisposition::Continue
     }
 
-    fn help(&self, _message: &Message) -> BotLoopDisposition {
+    fn help(&self, message: &Message) -> BotLoopDisposition {
+        if self.help_text.is_some() {
+            self.send_response(message, self.help_text.as_ref().unwrap());
+        }
+
         BotLoopDisposition::Continue
     }
 

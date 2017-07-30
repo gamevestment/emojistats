@@ -2,6 +2,20 @@
 bot_token = ""
 bot_admin_password = ""
 feedback_filename = "emojistats-feedback.log"
+help_text = """\
+**Commands**
+**global** (or **g**) - See global emoji statistics
+**server** (or **s**) - See the top emoji and users on this server
+**channel** (or **c**) - See the top emoji and users in this channel
+**me** (or **m**) - See your favourite emoji
+#channel - See the top emoji and users in that channel
+@user - See the mentioned user's favourite emoji
+"""
+about_text = """\
+I track emoji usage! :chart_with_upwards_trend:
+Made with :two_hearts: using Rust and discord-rs.
+:globe_with_meridians: https://github.com/quailiff/emojistats\
+"""
 
 [database]
 hostname = "localhost"

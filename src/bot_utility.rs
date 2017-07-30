@@ -70,13 +70,10 @@ pub fn remove_non_command_characters(s: &str) -> &str {
     let mut skip_pos = 0;
 
     while let Some(c) = s_chars.next() {
-        if "abcdefghijklmnopqrstuvwxyz\
-            ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-            0123456789_-<:!@#&"
-                   .contains(c) {
-            break;
-        } else {
+        if c.is_whitespace() || c == ',' {
             skip_pos += c.len_utf8();
+        } else {
+            break;
         }
     }
 

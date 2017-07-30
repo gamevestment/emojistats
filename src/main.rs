@@ -192,6 +192,14 @@ fn main() {
     info!("Connected to Discord successfully");
 
     // Perform other setup tasks
+    if let Ok(about_text) = config.get_str("config.about_text") {
+        bot.set_about_text(about_text);
+    }
+
+    if let Ok(help_text) = config.get_str("config.help_text") {
+        bot.set_help_text(help_text);
+    }
+
     if let Ok(feedback_filename) = config.get_str("config.feedback_filename") {
         bot.set_feedback_file(feedback_filename);
     }
