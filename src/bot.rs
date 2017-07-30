@@ -559,8 +559,6 @@ impl Bot {
                     "c" | "channel" => self.stats_channel(message, None),
                     "m" | "me" => self.stats_user(message, None),
                     _ => {
-                        debug!("{}", command);
-
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
                         match arg::get_type(command) {
@@ -570,22 +568,12 @@ impl Bot {
                             arg::Type::ChannelId(channel_id) => {
                                 self.stats_channel(message, Some(&channel_id));
                             }
-                            arg::Type::EmojiId(emoji_id) => {
-                                // TODO: Show usage for this emoji
-                                self.send_response(message, "Yes! That is an emoji!");
-                            }
                             _ => {
-                                let matches = self.emoji
-                                    .iter()
-                                    .filter(|e| match **e {
-                                                Emoji::Custom(ref emoji) => {
-                                                    emoji.pattern == command
-                                                }
-                                                Emoji::Unicode(ref emoji) => emoji == command,
-                                            });
+                                let mut matches =
+                                    self.emoji.iter().filter(|e| e.pattern() == command);
 
-                                if matches.count() == 0 {
-                                    self.help(message);
+                                if let Some(emoji) = matches.next() {
+                                    self.stats_emoji(message, &emoji);
                                 } else {
                                     // TODO: Show usage for this emoji
                                     self.send_response(message, "Yes! That is an emoji!");
@@ -968,6 +956,33 @@ impl Bot {
         }
 
         BotLoopDisposition::Continue
+    }
+
+    fn stats_emoji(&self, message: &Message, emoji: &Emoji) {
+        match self.db.get_emoji_usage(emoji) {
+            Ok(maybe_count) => {
+                match maybe_count {
+                    Some(count) if count > 0 => {
+                        self.send_response(message,
+                                           &format!("{} has been used {} time{}.",
+                                                   emoji.pattern(),
+                                                   count,
+                                                   if count == 1 { "" } else { "s" }));
+                    }
+                    _ => {
+                        self.send_response(message,
+                                           &format!("I've never seen anyone use {}.",
+                                                   emoji.pattern()));
+                    }
+                }
+            }
+            Err(reason) => {
+                warn!("Error obtaining emoji usage stats for emoji {}: {}",
+                      emoji.pattern(),
+                      reason);
+                self.send_response(message, RESPONSE_STATS_ERR);
+            }
+        }
     }
 
     fn respond_auth_required(&self, message: &Message) {

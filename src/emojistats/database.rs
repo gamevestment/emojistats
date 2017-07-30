@@ -5,12 +5,10 @@ use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, User, 
 use super::model::{Emoji, CustomEmoji};
 use postgres::rows::Rows;
 
-#[allow(dead_code)]
 pub struct Database {
     conn: postgres::Connection,
 }
 
-#[allow(dead_code)]
 impl Database {
     pub fn new<T>(params: T) -> postgres::Result<Database>
         where T: postgres::params::IntoConnectParams
@@ -304,6 +302,40 @@ impl Database {
             .query(QUERY_SELECT_TOP_CHANNEL_USERS, &[&(channel_id.0 as i64)])?;
 
         Ok(result_into_vec_users(result)?)
+    }
+
+    pub fn get_emoji_usage(&self, emoji: &Emoji) -> postgres::Result<Option<i64>> {
+        const QUERY_EMOJI_USAGE: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+        WHERE eu.emoji_id = $1;"#;
+
+        let emoji_id = match *emoji {
+            Emoji::Custom(ref emoji) => emoji.id.0 as i64,
+            Emoji::Unicode(ref emoji) => {
+                match self.get_emoji_id(emoji.clone())? {
+                    Some(id) => id as i64,
+                    None => {
+                        // This Unicode emoji is not in the database
+                        info!("Couldn't get statistics for unknown Unicode emoji <{}>",
+                              emoji);
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+
+        let result = self.conn.query(QUERY_EMOJI_USAGE, &[&emoji_id])?;
+
+        match result.iter().next() {
+            Some(row) => {
+                match row.get::<usize, Option<i64>>(0) {
+                    Some(count) => Ok(Some(count)),
+                    None => Ok(None),
+                }
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn get_user_name(&self, user_id: &UserId) -> postgres::Result<Option<String>> {

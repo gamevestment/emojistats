@@ -9,6 +9,23 @@ pub enum Emoji {
     Unicode(String), // Some emoji span multiple chars
 }
 
+impl Emoji {
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        match *self {
+            Emoji::Custom(ref emoji) => emoji.name(),
+            Emoji::Unicode(ref emoji) => emoji,
+        }
+    }
+
+    pub fn pattern(&self) -> &str {
+        match *self {
+            Emoji::Custom(ref emoji) => emoji.pattern(),
+            Emoji::Unicode(ref emoji) => emoji,
+        }
+    }
+}
+
 #[derive(Debug, Eq)]
 pub struct CustomEmoji {
     pub server_id: ServerId,
@@ -44,5 +61,13 @@ impl CustomEmoji {
             name,
             pattern,
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn pattern(&self) -> &str {
+        &self.pattern
     }
 }
