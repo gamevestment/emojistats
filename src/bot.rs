@@ -1,6 +1,7 @@
 extern crate discord;
 extern crate time;
 extern crate chrono_humanize;
+extern crate rand;
 
 use arg;
 use std::collections::{HashMap, HashSet};
@@ -14,10 +15,13 @@ use self::chrono_humanize::HumanTime;
 use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, LiveServer,
                            Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
                            PublicChannel, Server, ServerId, ServerInfo, User, UserId};
+use self::rand::{Rng, thread_rng};
 use self::time::{Timespec, get_time};
 
-const RESPONSE_STATS_ERR: &str = "Sorry! An error occurred while retrieving the statistics.";
-const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str = "Please use this command in a public channel.";
+const RESPONSE_STATS_ERR: &str = "\
+        Sorry! An error occurred while retrieving the statistics. :(";
+const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str = "\
+        Please use this command in a public channel. :shrug:";
 
 #[derive(Debug)]
 pub enum BotError {
@@ -575,8 +579,7 @@ impl Bot {
                                 if let Some(emoji) = matches.next() {
                                     self.stats_emoji(message, &emoji);
                                 } else {
-                                    // TODO: Show usage for this emoji
-                                    self.send_response(message, "Yes! That is an emoji!");
+                                    self.help(message);
                                 }
                             }
                         }
@@ -585,7 +588,11 @@ impl Bot {
                     }
                 }
             }
-            _ => BotLoopDisposition::Continue, // No command was provided; continue to next event
+            _ => {
+                // No command was provided
+                self.help(message);
+                BotLoopDisposition::Continue
+            }
         }
     }
 
@@ -600,18 +607,20 @@ impl Bot {
     fn attempt_auth(&mut self, message: &Message, password_attempt: &str) -> BotLoopDisposition {
         if self.bot_admins.contains_key(&message.author.id) {
             self.send_response(message,
-                               "You are already authenticated as a bot administrator.");
+                               "You are already authenticated as a bot administrator. :unlock:");
         } else if !self.private_channels.contains_key(&message.channel_id) {
-            self.send_response(message, "Please use this command in a private message.");
+            self.send_response(message,
+                               "Please use this command in a private message. :lock:");
         } else {
             if password_attempt.is_empty() {
-                self.send_response(message, "Please enter the bot administration password.");
+                self.send_response(message,
+                                   "Please enter the bot administration password. :lock:");
             } else if password_attempt == self.bot_admin_password {
-                self.send_response(message, "Authenticated successfully.");
+                self.send_response(message, "Authenticated successfully. :white_check_mark:");
                 self.bot_admins
                     .insert(message.author.id, message.author.clone());
             } else {
-                self.send_response(message, "Unable to authenticate.");
+                self.send_response(message, "Unable to authenticate. :x:");
             }
         }
 
@@ -627,7 +636,7 @@ impl Bot {
             self.send_response(message,
                                &format!("**{} version {}**\n\
                                        Online since {} on {} server{} comprising \
-                                       {} text channel{}.",
+                                       {} text channel{}. :clock2:",
                                        env!("CARGO_PKG_NAME"),
                                        env!("CARGO_PKG_VERSION"),
                                        online_time,
@@ -648,7 +657,7 @@ impl Bot {
 
     fn quit(&self, message: &Message) -> BotLoopDisposition {
         if self.bot_admins.contains_key(&message.author.id) {
-            self.send_response(message, "Quitting.");
+            self.send_response(message, "Quitting. :octagonal_sign:");
             info!("Quit command issued by {}.", message.author.name);
             BotLoopDisposition::Quit
         } else {
@@ -659,7 +668,7 @@ impl Bot {
 
     fn restart(&self, message: &Message) -> BotLoopDisposition {
         if self.bot_admins.contains_key(&message.author.id) {
-            self.send_response(message, "Restarting.");
+            self.send_response(message, "Restarting. :repeat:");
             info!("Restart command issued by {}.", message.author.name);
             BotLoopDisposition::Restart
         } else {
@@ -669,7 +678,8 @@ impl Bot {
     }
 
     fn feedback(&self, message: &Message, feedback: &str) -> BotLoopDisposition {
-        self.send_response(message, "Thanks. Your feedback has been logged for review.");
+        self.send_response(message,
+                           "Thanks. Your feedback has been logged for review. :smiley:");
 
         // Write the feedback to log files
         // If the the feedback spans multiple lines, indent the subsequent lines
@@ -757,17 +767,23 @@ impl Bot {
         };
 
         if top_emoji.len() == 0 {
-            self.send_response(message, "I've never seen anyone use any emoji.");
+            self.send_response(message, "I've never seen anyone use any emoji. :shrug:");
         } else {
             let stats = create_emoji_usage_line(top_emoji);
 
-            let _ =
-                self.discord
-                    .send_embed(message.channel_id,
-                                &format!("<@{}>", message.author.id),
-                                |e| {
-                                    e.fields(|f| f.field("Top used emoji globally", &stats, false))
-                                });
+            let earth_emoji_list = [":earth_africa:", ":earth_americas:", ":earth_asia:"];
+            let earth = thread_rng().choose(&earth_emoji_list).unwrap();
+
+            let _ = self.discord
+                .send_embed(message.channel_id,
+                            &format!("<@{}>", message.author.id),
+                            |e| {
+                                e.fields(|f| {
+                                             f.field(&format!("Top used emoji globally {}", earth),
+                                                     &stats,
+                                                     false)
+                                         })
+                            });
         }
 
         BotLoopDisposition::Continue
@@ -801,7 +817,7 @@ impl Bot {
 
         if top_emoji.len() == 0 {
             self.send_response(message,
-                               "I've never seen anyone use any emoji on this server.");
+                               "I've never seen anyone use any emoji on this server. :shrug:");
         } else {
             let top_users = match self.db.get_server_top_users(&server_id) {
                 Ok(results) => results,
@@ -822,7 +838,7 @@ impl Bot {
                 .send_embed(message.channel_id,
                             &format!("<@{}>", message.author.id),
                             |e| {
-                                e.title("Statistics for this server")
+                                e.title("Statistics for this server :chart_with_upwards_trend:")
                                     .fields(|f| {
                                                 f.field("Top emoji", &emoji_stats, true)
                                                     .field("Top users", &user_stats, true)
@@ -845,8 +861,11 @@ impl Bot {
         let channel_id = channel_id.unwrap_or(&message.channel_id);
 
         let stats_description = match self.public_text_channels.get(&channel_id) {
-            Some(channel) => format!("Statistics for #{}", channel.name),
-            None => "Channel statistics".to_string(),
+            Some(channel) => {
+                format!("Statistics for #{} :chart_with_upwards_trend:",
+                        channel.name)
+            }
+            None => "Channel statistics :chart_with_upwards_trend:".to_string(),
         };
 
         let top_emoji = match self.db.get_channel_top_emoji(&channel_id) {
@@ -862,7 +881,7 @@ impl Bot {
 
         if top_emoji.len() == 0 {
             self.send_response(message,
-                               "I've never seen anyone use any emoji in that channel.");
+                               "I've never seen anyone use any emoji in that channel. :shrug:");
         } else {
             let top_users = match self.db.get_channel_top_users(&channel_id) {
                 Ok(results) => results,
@@ -898,7 +917,7 @@ impl Bot {
         let user_id = user_id.unwrap_or(&message.author.id);
 
         if *user_id == self.bot_user_id {
-            self.send_response(message, "You're so silly!");
+            self.send_response(message, "You're so silly! :smile:");
             return BotLoopDisposition::Continue;
         }
 
@@ -926,9 +945,9 @@ impl Bot {
         };
 
         let stats_description = if *user_id == message.author.id {
-            "Your favourite emoji".to_string()
+            "Your favourite emoji :two_hearts:".to_string()
         } else {
-            format!("{}'s favourite emoji", user_name)
+            format!("{}'s favourite emoji :two_hearts:", user_name)
         };
 
         let top_emoji = match self.db.get_user_top_emoji(&user_id, server) {
@@ -945,7 +964,7 @@ impl Bot {
 
         if top_emoji.len() == 0 {
             self.send_response(message,
-                               &format!("I've never seen <@{}> use any emoji.", user_id));
+                               &format!("I've never seen <@{}> use any emoji. :shrug:", user_id));
         } else {
             let stats = create_emoji_usage_line(top_emoji);
 
@@ -986,7 +1005,7 @@ impl Bot {
     }
 
     fn respond_auth_required(&self, message: &Message) {
-        self.send_response(message, "Please authenticate first.");
+        self.send_response(message, "Please authenticate first. :lock:");
     }
 }
 

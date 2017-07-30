@@ -8,6 +8,7 @@ chrono-humanize = "0.0.10"
 config = "0.6.0"
 log = "0.3.8"
 nix = "0.8.1"
+rand = "0.3.15"
 time = "0.1.38"
 
 [dependencies.log4rs]

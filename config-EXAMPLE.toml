@@ -3,7 +3,7 @@ bot_token = ""
 bot_admin_password = ""
 feedback_filename = "emojistats-feedback.log"
 help_text = """\
-**Commands**
+**Commands** :book:
 **global** (or **g**) - See global emoji statistics
 **server** (or **s**) - See the top emoji and users on this server
 **channel** (or **c**) - See the top emoji and users in this channel
