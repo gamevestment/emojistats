@@ -2,6 +2,8 @@
 
 A Discord bot that tracks and reports on emoji usage. Built with [discord-rs](https://github.com/SpaceManiac/discord-rs).
 
+[Invite me to your Discord server!](https://discordapp.com/oauth2/authorize?permissions=0&client_id=311524286429003787&scope=bot)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 Copyright 2017 [Quailsoft](https://www.quailsoft.org/).
