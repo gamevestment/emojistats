@@ -1,75 +1,64 @@
-# emojistats-bot
+# emojistats
 
-A Discord bot that provides statistics on emoji usage. Built with [discord-rs](https://github.com/SpaceManiac/discord-rs).
+A Discord bot that tracks and reports on emoji usage. Built with [discord-rs](https://github.com/SpaceManiac/discord-rs).
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+Copyright 2017 [Quailsoft](https://www.quailsoft.org/).
 
 ## Commands
 
-To use a command, mention the bot at the beginning of the message; for example:
+To invoke a command, mention the bot at the beginning of the message; for example:
 
 ```
 @EmojiStats global
 ```
 
-Alternatively, you may directly message the bot. When you send a direct message, you do not need to mention the bot.
+|Command|Description|
+|-|-|
+|global|See global emoji statistics|
+|server|See the top emoji and users on this server|
+|channel|See the top emoji and users in this channel|
+|me|See your favourite emoji|
+|`#channel`|See the top emoji and users in that channel|
+|`@user`|See the mentioned user's favourite emoji|
+|*`(emoji)`*|See how many times that emoji was used|
+|about|See information about the bot|
+|help|See the bot commands|
+|feedback &lt;message&gt;|Send feedback to the bot administrators|
 
-**Note:**
-- When obtaining server, channel, or user stats in a public text channel, the stats returned will include custom emoji on that server.
-- When obtaining global stats or when obtaining stats for yourself in a direct message, the stats returned will be for Unicode emoji only.
+Feedback is recorded to a log file and sent to bot administrators in private channels.
 
-### General
+### Administrative commands
 
-|   Command  |   Where you can use it  |                  Description                  |
-|------------|-------------------------|-----------------------------------------------|
-|`about`     |Anywhere                 |See information about the bot                  |
-|`global`    |Anywhere                 |See the top used Unicode emoji globally        |
-|`server`    |Public text channels only|See the top used emoji on this server          |
-|`channel`   |Public text channels only|See the top used emoji on this channel         |
-|`<#channel>`|Public text channels only|See the top used emoji on the specified channel|
-|`me`        |Anywhere                 |See your favourite emoji                       |
-|`<@user>`   |Anywhere                 |See the specified user's favourite emoji       |
-|`<emoji>`   |Anywhere                 |See usage information for that emoji           |
-|`meta`      |Anywhere                 |See numbers about the bot                      |
+This bot has the four administrative commands below.
 
-### Bot control
-
-You must authenticate with the bot using `auth` before using any other bot control commands.
-
-|     Command     |                            Description                              |
-|-----------------|---------------------------------------------------------------------|
-|`auth <password>`|Attempts to authenticate with the bot using the bot control password.|
-|`quit`           |Shuts down the bot.                                                  |
-|`restart`        |Shuts down and restarts the bot.                                     |
-
-
-## Requirements
-
-- PostgreSQL
+|Command|Description|
+|-|-|
+|auth &lt;password&gt;|Attempt to authenticate as a bot administrator using the bot administration password. This is required in order to invoke all of the other administrative commands.|
+|botinfo|Display the program name, version, and uptime as well as the number of servers and public text channels to which the bot is connected.|
+|restart|Attempt to restart the bot binary with the same arguments with which it was invoked.|
+|quit|Halts program execution.|
 
 ## Configuration
 
-1. Copy `.env.example` to `.env`.
-2. Enter the PostgreSQL connection information in `.env`.
-3. Copy the bot token into `.env`.
-4. Enter a bot control password. To shut down the bot from Discord, you must `authenticate` using the bot control password and then use the `quit` command. If you do not enter a bot control password, you will not be able to authenticate or shut down the bot from Discord.
+1. Copy `config-EXAMPLE.toml` to `config.toml`.
+2. Copy the bot token into `config.toml`.
+3. Enter a bot administration password.
+
+*NB: If you do not enter a bot administration password, you will be unable to shut down or restart the bot from Discord.*
+
+*NB: Due to practical considerations, the bot administration password should not begin or end with whitespace (you will be unable to authenticate because whitespace is stripped), but it may contain whitespace between non-whitespace characters.*
 
 ```bash
-ES_LOG_FILENAME=emojistats.log
-
-ES_DB_HOST=localhost
-ES_DB_PORT=5432
-ES_DB_USER=user
-ES_DB_PASS=password
-ES_DB_NAME=database_name
-
-ES_BOT_TOKEN=Discord.Bot.Token
-
-# Use this password to control the bot through private messages
-ES_BOT_CONTROL_PASSWORD=MySuperSecretPassword
+[config]
+bot_token = ""
+bot_admin_password = ""
 ```
 
 ## Build notes
 
-As of 13 May 2017, [discord](https://crates.io/crates/discord/0.8.0) relies on [websocket ^0.17](https://crates.io/crates/websocket/0.17.1), which in turn relies on [openssl ^0.7.6](https://crates.io/crates/websocket/0.17.1). If you run into difficulties with compiling [rust-openssl v0.7.x](https://github.com/sfackler/rust-openssl/blob/b8fb29db5c246175a096260eacca38180cd77dd0/README.md), try:
+As of 30 July 2017, [discord](https://crates.io/crates/discord/0.8.0) relies on [websocket ^0.17](https://crates.io/crates/websocket/0.17.1), which in turn relies on [openssl ^0.7.6](https://crates.io/crates/websocket/0.17.1). If you run into difficulties with compiling [rust-openssl v0.7.x](https://github.com/sfackler/rust-openssl/blob/b8fb29db5c246175a096260eacca38180cd77dd0/README.md), try:
 
 - `cargo clean`
 - `export OPENSSL_INCLUDE_DIR=` (OpenSSL 1.0 include directory)

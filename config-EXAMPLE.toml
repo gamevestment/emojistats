@@ -11,6 +11,8 @@ help_text = """\
 #channel - See the top emoji and users in that channel
 @user - See the mentioned user's favourite emoji
 ***(emoji)*** - See how many times that emoji was used
+**about** - See information about the bot
+**help** - See these commands
 """
 about_text = """\
 I track emoji usage! :chart_with_upwards_trend:
