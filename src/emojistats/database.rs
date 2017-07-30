@@ -350,6 +350,7 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         channel_id BIGINT NOT NULL,
         user_id BIGINT NOT NULL,
         emoji_count INTEGER NOT NULL,
+        posted TIMESTAMP NOT NULL DEFAULT NOW(),
         PRIMARY KEY (id),
         FOREIGN KEY (channel_id) REFERENCES channel (id)
     );
