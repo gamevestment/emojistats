@@ -277,6 +277,7 @@ impl Database {
             INNER JOIN channel c ON m.channel_id = c.id
         WHERE c.server_id = $1
         GROUP BY u.name, u.discriminator
+        HAVING SUM(m.emoji_count) > 0
         ORDER BY SUM(m.emoji_count) DESC
         LIMIT 5;"#;
 
@@ -295,6 +296,7 @@ impl Database {
             INNER JOIN user_ u ON m.user_id = u.id
         WHERE m.channel_id = $1
         GROUP BY u.name, u.discriminator
+        HAVING SUM(m.emoji_count) > 0
         ORDER BY SUM(m.emoji_count) DESC
         LIMIT 5;"#;
 
