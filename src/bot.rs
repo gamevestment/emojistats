@@ -19,7 +19,7 @@ use self::rand::{Rng, thread_rng};
 use self::time::{Timespec, get_time};
 
 const RESPONSE_STATS_ERR: &str = "\
-        Sorry! An error occurred while retrieving the statistics. :(";
+        Sorry! An error occurred while retrieving the statistics. :frowning:";
 const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str = "\
         Please use this command in a public channel. :shrug:";
 
@@ -601,7 +601,7 @@ impl Bot {
     }
 
     fn send_response(&self, message: &Message, text: &str) {
-        self.send_message(message, &format!("{}: {}", message.author.name, text));
+        self.send_message(message, &format!("**{}**: {}", message.author.name, text));
     }
 
     fn attempt_auth(&mut self, message: &Message, password_attempt: &str) -> BotLoopDisposition {
@@ -776,7 +776,7 @@ impl Bot {
 
             let _ = self.discord
                 .send_embed(message.channel_id,
-                            &format!("{}", message.author.name),
+                            &format!("**{}**", message.author.name),
                             |e| {
                                 e.fields(|f| {
                                              f.field(&format!("Top used emoji globally {}", earth),
@@ -836,7 +836,7 @@ impl Bot {
 
             let _ = self.discord
                 .send_embed(message.channel_id,
-                            &format!("{}", message.author.name),
+                            &format!("**{}**", message.author.name),
                             |e| {
                                 e.title("Statistics for this server :chart_with_upwards_trend:")
                                     .fields(|f| {
