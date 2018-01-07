@@ -6,6 +6,7 @@ help_text = """\
 **Commands** :book:
 **global** (or **g**) - See global emoji statistics
 **server** (or **s**) - See the top emoji and users on this server
+**custom** (or **u**) - See the top custom emoji and custom emoji users on this server
 **channel** (or **c**) - See the top emoji and users in this channel
 **me** (or **m**) - See your favourite emoji
 #channel - See the top emoji and users in that channel

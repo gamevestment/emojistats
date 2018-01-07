@@ -580,7 +580,7 @@ impl Bot {
                     "s" | "server" => self.stats_server(message),
                     "c" | "channel" => self.stats_channel(message, None),
                     "m" | "me" => self.stats_user(message, None),
-                    "custom" => self.stats_server_custom(message),
+                    "u" | "custom" => self.stats_server_custom(message),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
