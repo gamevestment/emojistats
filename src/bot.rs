@@ -1013,7 +1013,7 @@ impl Bot {
 
             let _ = self.discord.send_embed(
                 message.channel_id,
-                &format!("{}", message.author.name),
+                &format!("**{}**", message.author.name),
                 |e| {
                     e.title(&stats_description).fields(|f| {
                         f.field("Top emoji", &emoji_stats, true).field(
@@ -1087,7 +1087,7 @@ impl Bot {
 
             let _ = self.discord.send_embed(
                 message.channel_id,
-                &format!("{}", message.author.name),
+                &format!("**{}**", message.author.name),
                 |e| e.fields(|f| f.field(&stats_description, &stats, false)),
             );
         }
