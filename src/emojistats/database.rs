@@ -235,6 +235,28 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
+    pub fn get_server_top_custom_emoji(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+            INNER JOIN channel c ON eu.channel_id = c.id
+        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result_into_vec_emoji(result)?)
+    }
+
     pub fn get_channel_top_emoji(
         &self,
         channel_id: &ChannelId,
@@ -306,6 +328,30 @@ impl Database {
 
         let result = self.conn
             .query(QUERY_SELECT_TOP_SERVER_USERS, &[&(server_id.0 as i64)])?;
+
+        Ok(result_into_vec_users(result)?)
+    }
+
+    pub fn get_server_top_custom_emoji_users(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(String, i64)>> {
+        const QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI_USERS: &str = r#"
+        SELECT u.name, u.discriminator, SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN user_ u ON eu.user_id = u.id
+            INNER JOIN channel c ON eu.channel_id = c.id
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        GROUP BY u.name, u.discriminator
+        HAVING SUM(eu.use_count) > 0
+        ORDER BY SUM(eu.use_count) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI_USERS,
+            &[&(server_id.0 as i64)],
+        )?;
 
         Ok(result_into_vec_users(result)?)
     }

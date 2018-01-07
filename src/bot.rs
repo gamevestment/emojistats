@@ -580,6 +580,7 @@ impl Bot {
                     "s" | "server" => self.stats_server(message),
                     "c" | "channel" => self.stats_channel(message, None),
                     "m" | "me" => self.stats_user(message, None),
+                    "custom" => self.stats_server_custom(message),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
@@ -883,6 +884,71 @@ impl Bot {
                                 &user_stats,
                                 true,
                             )
+                        })
+                },
+            );
+        }
+
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_server_custom(&self, message: &Message) -> BotLoopDisposition {
+        if self.private_channels.contains_key(&message.channel_id) {
+            self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
+            return BotLoopDisposition::Continue;
+        }
+
+        let server_id = match self.public_text_channels.get(&message.channel_id) {
+            Some(channel) => channel.server_id,
+            None => {
+                warn!("Unknown public text channel ({})", message.channel_id);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_custom_emoji = match self.db.get_server_top_custom_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve top used custom emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        if top_custom_emoji.len() == 0 {
+            self.send_response(
+                message,
+                "I've never seen anyone use any custom emoji on this server. :shrug:",
+            );
+        } else {
+            let top_users = match self.db.get_server_top_custom_emoji_users(&server_id) {
+                Ok(results) => results,
+                Err(reason) => {
+                    warn!(
+                        "Unable to retrieve top custom emoji users on server ({}): {}",
+                        server_id, reason
+                    );
+                    self.send_response(message, RESPONSE_STATS_ERR);
+                    return BotLoopDisposition::Continue;
+                }
+            };
+
+            let user_stats = create_top_users_line(top_users);
+
+            let custom_emoji_stats = create_emoji_usage_line(top_custom_emoji);
+
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("**{}**", message.author.name),
+                |e| {
+                    e.title("Custom emoji statistics for this server :chart_with_upwards_trend:")
+                        .fields(|f| {
+                            f.field("Top custom emoji", &custom_emoji_stats, true)
+                                .field("Top users", &user_stats, true)
                         })
                 },
             );
