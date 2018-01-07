@@ -36,7 +36,8 @@ pub struct CustomEmoji {
 
 impl Hash for CustomEmoji {
     fn hash<H>(&self, state: &mut H)
-        where H: Hasher
+    where
+        H: Hasher,
     {
         self.id.hash(state);
     }
@@ -50,7 +51,8 @@ impl PartialEq for CustomEmoji {
 
 impl CustomEmoji {
     pub fn new<S>(server_id: ServerId, id: EmojiId, name: S) -> CustomEmoji
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         let name = name.into();
         let pattern = format!("<:{}:{}>", name, id);

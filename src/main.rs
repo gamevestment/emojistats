@@ -1,7 +1,7 @@
 extern crate config;
+extern crate log4rs;
 #[macro_use]
 extern crate log;
-extern crate log4rs;
 extern crate nix;
 extern crate postgres;
 
@@ -44,7 +44,9 @@ fn init_logging() {
 
     // Build appender for file log
     let file = log4rs::append::file::FileAppender::builder()
-        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(LOG_FORMAT)))
+        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
+            LOG_FORMAT,
+        )))
         .build(filename)
         .expect("Failed to create log file");
     let file_appender = log4rs::config::Appender::builder().build("file", Box::new(file));
@@ -72,10 +74,10 @@ fn str_ref_to_cstring(s: &str, string_descr: &str) -> CString {
     match CString::new(s) {
         Ok(cs) => cs,
         Err(reason) => {
-            error!("Failed to convert {} \"{}\" to CString: {}",
-                   string_descr,
-                   s,
-                   reason);
+            error!(
+                "Failed to convert {} \"{}\" to CString: {}",
+                string_descr, s, reason
+            );
             process::exit(ExitStatus::UnableToConvertCString as i32);
         }
     }
@@ -141,8 +143,10 @@ fn main() {
     let config = if maybe_config.is_ok() {
         maybe_config.unwrap()
     } else {
-        error!("Unable to open any config files beginning with \"{}\".",
-               config_filename);
+        error!(
+            "Unable to open any config files beginning with \"{}\".",
+            config_filename
+        );
         process::exit(ExitStatus::UnableToObtainConfig as i32);
     };
 
@@ -154,23 +158,25 @@ fn main() {
     }
 
     if let Ok(user) = config.get_str("database.username") {
-        db_conn_params_builder.user(&user,
-                                    config
-                                        .get_str("database.password")
-                                        .ok()
-                                        .as_ref()
-                                        .map(String::as_str));
+        db_conn_params_builder.user(
+            &user,
+            config
+                .get_str("database.password")
+                .ok()
+                .as_ref()
+                .map(String::as_str),
+        );
     }
 
     if let Ok(database_name) = config.get_str("database.name") {
         db_conn_params_builder.database(&database_name);
     }
 
-    let db_conn_params =
-        db_conn_params_builder
-            .build(postgres::params::Host::Tcp(config
-                                                   .get_str("database.hostname")
-                                                   .unwrap_or("localhost".to_string())));
+    let db_conn_params = db_conn_params_builder.build(postgres::params::Host::Tcp(
+        config
+            .get_str("database.hostname")
+            .unwrap_or("localhost".to_string()),
+    ));
 
     let db = match Database::new(db_conn_params) {
         Ok(db) => db,

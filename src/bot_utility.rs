@@ -105,7 +105,7 @@ pub fn extract_first_word(s: &str) -> (&str, &str) {
 
 mod tests {
     #[allow(unused_imports)]
-    use super::{extract_preceding_arg, remove_non_command_characters, extract_first_word};
+    use super::{extract_first_word, extract_preceding_arg, remove_non_command_characters};
     #[allow(unused_imports)]
     use super::discord::model::{ChannelId, EmojiId, RoleId, UserId};
     #[allow(unused_imports)]

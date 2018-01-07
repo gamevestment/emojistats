@@ -115,8 +115,8 @@ pub fn get_type(arg: &str) -> Type {
 mod tests {
     extern crate discord;
 
-    use super::{Type, get_type};
-    use self::discord::model::{UserId, ChannelId, RoleId, EmojiId};
+    use super::{get_type, Type};
+    use self::discord::model::{ChannelId, EmojiId, RoleId, UserId};
 
     macro_rules! test {
         ($test_string:expr => Text) => {

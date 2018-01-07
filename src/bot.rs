@@ -1,27 +1,27 @@
-extern crate discord;
-extern crate time;
 extern crate chrono_humanize;
+extern crate discord;
 extern crate rand;
+extern crate time;
 
 use arg;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use bot_utility::{extract_preceding_arg, remove_non_command_characters, extract_first_word,
+use bot_utility::{extract_first_word, extract_preceding_arg, remove_non_command_characters,
                   BasicServerInfo, MessageRecipient};
 use emojistats::{CustomEmoji, Database, Emoji};
 
 use self::chrono_humanize::HumanTime;
-use self::discord::model::{Event, Channel, ChannelId, ChannelType, Game, GameType, LiveServer,
+use self::discord::model::{Channel, ChannelId, ChannelType, Event, Game, GameType, LiveServer,
                            Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
                            PublicChannel, Server, ServerId, ServerInfo, User, UserId};
-use self::rand::{Rng, thread_rng};
-use self::time::{Timespec, get_time};
+use self::rand::{thread_rng, Rng};
+use self::time::{get_time, Timespec};
 
-const RESPONSE_STATS_ERR: &str = "\
-        Sorry! An error occurred while retrieving the statistics. :frowning:";
-const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str = "\
-        Please use this command in a public channel. :shrug:";
+const RESPONSE_STATS_ERR: &str =
+    "Sorry! An error occurred while retrieving the statistics. :frowning:";
+const RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL: &str =
+    "Please use this command in a public channel. :shrug:";
 
 #[derive(Debug)]
 pub enum BotError {
@@ -73,8 +73,10 @@ impl Bot {
         let (discord_conn, ready_event) = match discord.connect() {
             Ok((discord_conn, ready_event)) => (discord_conn, ready_event),
             Err(reason) => {
-                error!("Failed to create websocket connection to Discord: {}",
-                       reason);
+                error!(
+                    "Failed to create websocket connection to Discord: {}",
+                    reason
+                );
                 return Err(BotError::FailedToConnect);
             }
         };
@@ -85,10 +87,12 @@ impl Bot {
         let mut bot_admins = HashMap::new();
         match discord.get_application_info() {
             Ok(application_info) => {
-                debug!("Application owner = {}#{} ({})",
-                       application_info.owner.name,
-                       application_info.owner.discriminator,
-                       application_info.owner.id);
+                debug!(
+                    "Application owner = {}#{} ({})",
+                    application_info.owner.name,
+                    application_info.owner.discriminator,
+                    application_info.owner.id
+                );
                 bot_admins.insert(application_info.owner.id, application_info.owner);
             }
             Err(_) => {
@@ -97,38 +101,41 @@ impl Bot {
         }
 
         Ok(Bot {
-               discord,
-               discord_conn,
-               online_since: get_time(),
-               bot_user_id,
-               bot_admin_password,
-               bot_admins,
-               about_text: None,
-               help_text: None,
-               feedback_file: None,
-               servers: HashMap::new(),
-               public_text_channels: HashMap::new(),
-               private_channels: HashMap::new(),
-               unknown_public_text_channels: HashSet::new(),
-               db,
-               emoji: HashSet::new(),
-           })
+            discord,
+            discord_conn,
+            online_since: get_time(),
+            bot_user_id,
+            bot_admin_password,
+            bot_admins,
+            about_text: None,
+            help_text: None,
+            feedback_file: None,
+            servers: HashMap::new(),
+            public_text_channels: HashMap::new(),
+            private_channels: HashMap::new(),
+            unknown_public_text_channels: HashSet::new(),
+            db,
+            emoji: HashSet::new(),
+        })
     }
 
     pub fn set_about_text<S>(&mut self, text: S)
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         self.about_text = Some(text.into());
     }
 
     pub fn set_help_text<S>(&mut self, text: S)
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         self.help_text = Some(text.into());
     }
 
     pub fn set_feedback_file<S>(&mut self, filename: S)
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         let filename = filename.into();
 
@@ -138,9 +145,10 @@ impl Bot {
                 info!("Logging feedback to file: <{}>", filename);
             }
             Err(reason) => {
-                warn!("Unable to open file for logging feedback <{}>: {}",
-                      filename,
-                      reason);
+                warn!(
+                    "Unable to open file for logging feedback <{}>: {}",
+                    filename, reason
+                );
             }
         }
     }
@@ -151,18 +159,21 @@ impl Bot {
         match self.db.add_emoji(&emoji, None) {
             Ok(_) => {}
             Err(reason) => {
-                warn!("Error adding Unicode emoji <{:?}> to database: {}",
-                      emoji,
-                      reason);
+                warn!(
+                    "Error adding Unicode emoji <{:?}> to database: {}",
+                    emoji, reason
+                );
             }
         }
         self.emoji.insert(emoji);
     }
 
     pub fn run(mut self) -> BotDisposition {
-        self.set_game(format!("{} version {}",
-                              env!("CARGO_PKG_NAME"),
-                              env!("CARGO_PKG_VERSION")));
+        self.set_game(format!(
+            "{} version {}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        ));
 
         let mut bot_loop_disposition = BotLoopDisposition::Continue;
 
@@ -172,28 +183,24 @@ impl Bot {
                 Ok(Event::MessageCreate(message)) => {
                     bot_loop_disposition = self.process_message(message);
                 }
-                Ok(Event::ServerCreate(server)) => {
-                    match server {
-                        PossibleServer::Online(server) => {
-                            self.add_emoji_list(server.id, server.emojis.clone());
-                            self.add_live_server(server);
-                        }
-                        PossibleServer::Offline(_) => {}
+                Ok(Event::ServerCreate(server)) => match server {
+                    PossibleServer::Online(server) => {
+                        self.add_emoji_list(server.id, server.emojis.clone());
+                        self.add_live_server(server);
                     }
-                }
+                    PossibleServer::Offline(_) => {}
+                },
                 Ok(Event::ServerUpdate(server)) => {
                     self.update_server(server);
                 }
-                Ok(Event::ServerDelete(possible_server)) => {
-                    match possible_server {
-                        PossibleServer::Online(server) => {
-                            self.remove_server_id(&server.id);
-                        }
-                        PossibleServer::Offline(server_id) => {
-                            self.remove_server_id(&server_id);
-                        }
+                Ok(Event::ServerDelete(possible_server)) => match possible_server {
+                    PossibleServer::Online(server) => {
+                        self.remove_server_id(&server.id);
                     }
-                }
+                    PossibleServer::Offline(server_id) => {
+                        self.remove_server_id(&server_id);
+                    }
+                },
                 Ok(Event::ChannelCreate(channel)) => {
                     self.add_channel(channel);
                 }
@@ -287,10 +294,10 @@ impl Bot {
         self.add_emoji_list(new_server_info.id, new_server_info.emojis);
 
         if let Some(server) = self.servers.get_mut(&new_server_info.id) {
-            debug!("Updating server info: {} -> {} ({})",
-                   server.name,
-                   new_server_info.name,
-                   server.id);
+            debug!(
+                "Updating server info: {} -> {} ({})",
+                server.name, new_server_info.name, server.id
+            );
 
             server.name = new_server_info.name;
             server.icon = new_server_info.icon;
@@ -306,25 +313,27 @@ impl Bot {
                 }
 
                 if !self.public_text_channels.contains_key(&channel.id) {
-                    debug!("Adding new public text channel #{} ({})",
-                           channel.name,
-                           channel.id);
+                    debug!(
+                        "Adding new public text channel #{} ({})",
+                        channel.name, channel.id
+                    );
                 }
 
                 if let Err(reason) = self.db.add_channel(&channel) {
-                    warn!("Error adding channel ({}) to database: {}",
-                          channel.id,
-                          reason);
+                    warn!(
+                        "Error adding channel ({}) to database: {}",
+                        channel.id, reason
+                    );
                 }
 
                 self.public_text_channels.insert(channel.id, channel);
             }
             Channel::Private(channel) => {
                 if !self.private_channels.contains_key(&channel.id) {
-                    debug!("Adding new private channel with {}#{} ({})",
-                           channel.recipient.name,
-                           channel.recipient.discriminator,
-                           channel.id);
+                    debug!(
+                        "Adding new private channel with {}#{} ({})",
+                        channel.recipient.name, channel.recipient.discriminator, channel.id
+                    );
                 }
 
                 self.private_channels.insert(channel.id, channel);
@@ -336,17 +345,18 @@ impl Bot {
     fn remove_channel(&mut self, channel: &Channel) {
         match *channel {
             Channel::Public(ref channel) => {
-                debug!("Removing public text channel #{} ({})",
-                       channel.name,
-                       channel.id);
+                debug!(
+                    "Removing public text channel #{} ({})",
+                    channel.name, channel.id
+                );
 
                 self.public_text_channels.remove(&channel.id);
             }
             Channel::Private(ref channel) => {
-                debug!("Removing private channel with {}#{} ({})",
-                       channel.recipient.name,
-                       channel.recipient.discriminator,
-                       channel.id);
+                debug!(
+                    "Removing private channel with {}#{} ({})",
+                    channel.recipient.name, channel.recipient.discriminator, channel.id
+                );
 
                 self.private_channels.remove(&channel.id);
             }
@@ -358,10 +368,10 @@ impl Bot {
         match channel {
             Channel::Public(new_channel_info) => {
                 if let Some(channel) = self.public_text_channels.get_mut(&new_channel_info.id) {
-                    debug!("Updating existing public text channel #{} -> #{} ({})",
-                           channel.name,
-                           new_channel_info.name,
-                           channel.id);
+                    debug!(
+                        "Updating existing public text channel #{} -> #{} ({})",
+                        channel.name, new_channel_info.name, channel.id
+                    );
 
                     channel.name = new_channel_info.name;
                     return;
@@ -376,11 +386,10 @@ impl Bot {
 
     fn add_user(&mut self, user: &User) {
         if let Err(reason) = self.db.add_user(user) {
-            warn!("Error adding user {}#{} ({}) to database: {}",
-                  user.name,
-                  user.discriminator,
-                  user.id,
-                  reason);
+            warn!(
+                "Error adding user {}#{} ({}) to database: {}",
+                user.name, user.discriminator, user.id, reason
+            );
         }
     }
 
@@ -415,14 +424,16 @@ impl Bot {
 
             match self.db.add_emoji(&custom_emoji, Some(&server_id)) {
                 Ok(_) => {
-                    debug!("Added custom emoji on server ({}): <{:?}>",
-                           server_id,
-                           custom_emoji);
+                    debug!(
+                        "Added custom emoji on server ({}): <{:?}>",
+                        server_id, custom_emoji
+                    );
                 }
                 Err(reason) => {
-                    warn!("Error adding custom emoji <{:?}> to database: {}",
-                          custom_emoji,
-                          reason);
+                    warn!(
+                        "Error adding custom emoji <{:?}> to database: {}",
+                        custom_emoji, reason
+                    );
                 }
             }
 
@@ -431,16 +442,18 @@ impl Bot {
     }
 
     fn set_game<S>(&mut self, game_name: S)
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
-        self.discord_conn
-            .set_presence(Some(Game {
-                                   name: game_name.into(),
-                                   kind: GameType::Playing,
-                                   url: None,
-                               }),
-                          OnlineStatus::Online,
-                          false);
+        self.discord_conn.set_presence(
+            Some(Game {
+                name: game_name.into(),
+                kind: GameType::Playing,
+                url: None,
+            }),
+            OnlineStatus::Online,
+            false,
+        );
     }
 
     fn process_message(&mut self, message: Message) -> BotLoopDisposition {
@@ -448,10 +461,11 @@ impl Bot {
         //
         // If the channel is still unknown after refreshing the server list, add it to a list of
         //     "unknown channels" so that we don't keep trying to get information on it
-        if !self.public_text_channels.contains_key(&message.channel_id) &&
-           !self.private_channels.contains_key(&message.channel_id) &&
-           !self.unknown_public_text_channels
-                .contains(&message.channel_id) {
+        if !self.public_text_channels.contains_key(&message.channel_id)
+            && !self.private_channels.contains_key(&message.channel_id)
+            && !self.unknown_public_text_channels
+                .contains(&message.channel_id)
+        {
             self.resolve_unknown_channel(&message.channel_id);
 
             if !self.public_text_channels.contains_key(&message.channel_id) {
@@ -473,8 +487,8 @@ impl Bot {
         }
 
         // If the message begins with a user id,
-        if let (Some(arg::Type::UserId(user_id)), command) =
-            extract_preceding_arg(&message.content) {
+        if let (Some(arg::Type::UserId(user_id)), command) = extract_preceding_arg(&message.content)
+        {
             // And that user ID is the bot user ID, this message is a command
             if user_id == self.bot_user_id {
                 return self.process_command(&message, command);
@@ -499,9 +513,10 @@ impl Bot {
                 }
             }
             Err(reason) => {
-                warn!("Unable to determine whether message {} exists in database: {}",
-                      message.id,
-                      reason);
+                warn!(
+                    "Unable to determine whether message {} exists in database: {}",
+                    message.id, reason
+                );
                 return;
             }
         }
@@ -519,27 +534,30 @@ impl Bot {
             if count > 0 {
                 total_emoji_used += count;
 
-                match self.db
-                          .record_emoji_usage(&message.channel_id,
-                                              &message.author.id,
-                                              emoji,
-                                              count) {
+                match self.db.record_emoji_usage(
+                    &message.channel_id,
+                    &message.author.id,
+                    emoji,
+                    count,
+                ) {
                     Ok(_) => {}
                     Err(reason) => warn!("Error recording emoji usage: {}", reason),
                 }
             }
         }
 
-        match self.db
-                  .record_message_stats(&message.id,
-                                        &message.channel_id,
-                                        &message.author.id,
-                                        total_emoji_used) {
+        match self.db.record_message_stats(
+            &message.id,
+            &message.channel_id,
+            &message.author.id,
+            total_emoji_used,
+        ) {
             Ok(_) => {}
             Err(reason) => {
-                warn!("Error recording statistics for message {}: {}",
-                      message.id,
-                      reason);
+                warn!(
+                    "Error recording statistics for message {}: {}",
+                    message.id, reason
+                );
             }
         }
     }
@@ -606,15 +624,21 @@ impl Bot {
 
     fn attempt_auth(&mut self, message: &Message, password_attempt: &str) -> BotLoopDisposition {
         if self.bot_admins.contains_key(&message.author.id) {
-            self.send_response(message,
-                               "You are already authenticated as a bot administrator. :unlock:");
+            self.send_response(
+                message,
+                "You are already authenticated as a bot administrator. :unlock:",
+            );
         } else if !self.private_channels.contains_key(&message.channel_id) {
-            self.send_response(message,
-                               "Please use this command in a private message. :lock:");
+            self.send_response(
+                message,
+                "Please use this command in a private message. :lock:",
+            );
         } else {
             if password_attempt.is_empty() {
-                self.send_response(message,
-                                   "Please enter the bot administration password. :lock:");
+                self.send_response(
+                    message,
+                    "Please enter the bot administration password. :lock:",
+                );
             } else if password_attempt == self.bot_admin_password {
                 self.send_response(message, "Authenticated successfully. :white_check_mark:");
                 self.bot_admins
@@ -633,21 +657,25 @@ impl Bot {
 
             let online_time = HumanTime::from(self.online_since - get_time());
 
-            self.send_response(message,
-                               &format!("**{} version {}**\n\
-                                       Online since {} on {} server{} comprising \
-                                       {} text channel{}. :clock2:",
-                                       env!("CARGO_PKG_NAME"),
-                                       env!("CARGO_PKG_VERSION"),
-                                       online_time,
-                                       self.servers.len(),
-                                       if self.servers.len() == 1 { "" } else { "s" },
-                                       self.public_text_channels.len(),
-                                       if self.public_text_channels.len() == 1 {
-                                           ""
-                                       } else {
-                                           "s"
-                                       }));
+            self.send_response(
+                message,
+                &format!(
+                    "**{} version {}**\n\
+                     Online since {} on {} server{} comprising \
+                     {} text channel{}. :clock2:",
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION"),
+                    online_time,
+                    self.servers.len(),
+                    if self.servers.len() == 1 { "" } else { "s" },
+                    self.public_text_channels.len(),
+                    if self.public_text_channels.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ),
+            );
         } else {
             self.respond_auth_required(message);
         }
@@ -678,28 +706,33 @@ impl Bot {
     }
 
     fn feedback(&self, message: &Message, feedback: &str) -> BotLoopDisposition {
-        self.send_response(message,
-                           "Thanks. Your feedback has been logged for review. :smiley:");
+        self.send_response(
+            message,
+            "Thanks. Your feedback has been logged for review. :smiley:",
+        );
 
         // Write the feedback to log files
         // If the the feedback spans multiple lines, indent the subsequent lines
-        let log_feedback =
-            feedback.replace("\n",
-                             &format!("\n              {}#{}> ",
-                                     message.author.name,
-                                     message.author.discriminator));
+        let log_feedback = feedback.replace(
+            "\n",
+            &format!(
+                "\n              {}#{}> ",
+                message.author.name, message.author.discriminator
+            ),
+        );
 
-        let log_feedback = format!("Feedback from {}#{}: {}\n",
-                                   message.author.name,
-                                   message.author.discriminator,
-                                   log_feedback);
+        let log_feedback = format!(
+            "Feedback from {}#{}: {}\n",
+            message.author.name, message.author.discriminator, log_feedback
+        );
         info!("{}", log_feedback);
 
         if self.feedback_file.is_some() {
             match self.feedback_file
-                      .as_ref()
-                      .unwrap()
-                      .write(log_feedback.as_bytes()) {
+                .as_ref()
+                .unwrap()
+                .write(log_feedback.as_bytes())
+            {
                 Ok(_) => {}
                 Err(reason) => {
                     warn!("Error writing feedback \"{}\" to log: {}", feedback, reason);
@@ -708,18 +741,19 @@ impl Bot {
         }
 
         // Send the feedback to administrators
-        let feedback = format!("Feedback from {}#{}:\n```\n{}```",
-                               message.author.name,
-                               message.author.discriminator,
-                               feedback);
+        let feedback = format!(
+            "Feedback from {}#{}:\n```\n{}```",
+            message.author.name, message.author.discriminator, feedback
+        );
 
         for (user_id, user) in &self.bot_admins {
             let mut num_channels_sent_to = 0;
 
             // Look for an existing private channel for each administrator
             for (channel_id, _) in self.private_channels
-                    .iter()
-                    .filter(|&(_, c)| c.recipient.id == *user_id) {
+                .iter()
+                .filter(|&(_, c)| c.recipient.id == *user_id)
+            {
                 num_channels_sent_to += 1;
                 self.send_message(channel_id, &feedback);
             }
@@ -729,10 +763,11 @@ impl Bot {
                 if let Ok(private_channel) = self.discord.create_private_channel(*user_id) {
                     self.send_message(&private_channel.id, &feedback);
                 } else {
-                    warn!("Unable to create private channel to send feedback to bot administrator \
-                          {}#{}.",
-                          user.name,
-                          user.discriminator);
+                    warn!(
+                        "Unable to create private channel to send feedback to bot administrator \
+                         {}#{}.",
+                        user.name, user.discriminator
+                    );
                 }
             }
         }
@@ -774,16 +809,15 @@ impl Bot {
             let earth_emoji_list = [":earth_africa:", ":earth_americas:", ":earth_asia:"];
             let earth = thread_rng().choose(&earth_emoji_list).unwrap();
 
-            let _ = self.discord
-                .send_embed(message.channel_id,
-                            &format!("**{}**", message.author.name),
-                            |e| {
-                                e.fields(|f| {
-                                             f.field(&format!("Top used emoji globally {}", earth),
-                                                     &stats,
-                                                     false)
-                                         })
-                            });
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("**{}**", message.author.name),
+                |e| {
+                    e.fields(|f| {
+                        f.field(&format!("Top used emoji globally {}", earth), &stats, false)
+                    })
+                },
+            );
         }
 
         BotLoopDisposition::Continue
@@ -807,24 +841,28 @@ impl Bot {
         let top_emoji = match self.db.get_server_top_emoji(&server_id) {
             Ok(results) => results,
             Err(reason) => {
-                warn!("Unable to retrieve top used emoji on server ({}): {}",
-                      server_id,
-                      reason);
+                warn!(
+                    "Unable to retrieve top used emoji on server ({}): {}",
+                    server_id, reason
+                );
                 self.send_response(message, RESPONSE_STATS_ERR);
                 return BotLoopDisposition::Continue;
             }
         };
 
         if top_emoji.len() == 0 {
-            self.send_response(message,
-                               "I've never seen anyone use any emoji on this server. :shrug:");
+            self.send_response(
+                message,
+                "I've never seen anyone use any emoji on this server. :shrug:",
+            );
         } else {
             let top_users = match self.db.get_server_top_users(&server_id) {
                 Ok(results) => results,
                 Err(reason) => {
-                    warn!("Unable to retrieve top users on server ({}): {}",
-                          server_id,
-                          reason);
+                    warn!(
+                        "Unable to retrieve top users on server ({}): {}",
+                        server_id, reason
+                    );
                     self.send_response(message, RESPONSE_STATS_ERR);
                     return BotLoopDisposition::Continue;
                 }
@@ -834,25 +872,30 @@ impl Bot {
 
             let emoji_stats = create_emoji_usage_line(top_emoji);
 
-            let _ = self.discord
-                .send_embed(message.channel_id,
-                            &format!("**{}**", message.author.name),
-                            |e| {
-                                e.title("Statistics for this server :chart_with_upwards_trend:")
-                                    .fields(|f| {
-                                                f.field("Top emoji", &emoji_stats, true)
-                                                    .field("Top users", &user_stats, true)
-                                            })
-                            });
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("**{}**", message.author.name),
+                |e| {
+                    e.title("Statistics for this server :chart_with_upwards_trend:")
+                        .fields(|f| {
+                            f.field("Top emoji", &emoji_stats, true).field(
+                                "Top users",
+                                &user_stats,
+                                true,
+                            )
+                        })
+                },
+            );
         }
 
         BotLoopDisposition::Continue
     }
 
-    fn stats_channel(&self,
-                     message: &Message,
-                     channel_id: Option<&ChannelId>)
-                     -> BotLoopDisposition {
+    fn stats_channel(
+        &self,
+        message: &Message,
+        channel_id: Option<&ChannelId>,
+    ) -> BotLoopDisposition {
         if self.private_channels.contains_key(&message.channel_id) {
             self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
             return BotLoopDisposition::Continue;
@@ -861,34 +904,38 @@ impl Bot {
         let channel_id = channel_id.unwrap_or(&message.channel_id);
 
         let stats_description = match self.public_text_channels.get(&channel_id) {
-            Some(channel) => {
-                format!("Statistics for #{} :chart_with_upwards_trend:",
-                        channel.name)
-            }
+            Some(channel) => format!(
+                "Statistics for #{} :chart_with_upwards_trend:",
+                channel.name
+            ),
             None => "Channel statistics :chart_with_upwards_trend:".to_string(),
         };
 
         let top_emoji = match self.db.get_channel_top_emoji(&channel_id) {
             Ok(results) => results,
             Err(reason) => {
-                warn!("Unable to retrieve top used emoji on channel ({}): {}",
-                      message.channel_id,
-                      reason);
+                warn!(
+                    "Unable to retrieve top used emoji on channel ({}): {}",
+                    message.channel_id, reason
+                );
                 self.send_response(message, RESPONSE_STATS_ERR);
                 return BotLoopDisposition::Continue;
             }
         };
 
         if top_emoji.len() == 0 {
-            self.send_response(message,
-                               "I've never seen anyone use any emoji in that channel. :shrug:");
+            self.send_response(
+                message,
+                "I've never seen anyone use any emoji in that channel. :shrug:",
+            );
         } else {
             let top_users = match self.db.get_channel_top_users(&channel_id) {
                 Ok(results) => results,
                 Err(reason) => {
-                    warn!("Unable to retrieve top users in channel ({}): {}",
-                          channel_id,
-                          reason);
+                    warn!(
+                        "Unable to retrieve top users in channel ({}): {}",
+                        channel_id, reason
+                    );
                     self.send_response(message, RESPONSE_STATS_ERR);
                     return BotLoopDisposition::Continue;
                 }
@@ -898,16 +945,19 @@ impl Bot {
 
             let emoji_stats = create_emoji_usage_line(top_emoji);
 
-            let _ = self.discord
-                .send_embed(message.channel_id,
-                            &format!("{}", message.author.name),
-                            |e| {
-                                e.title(&stats_description)
-                                    .fields(|f| {
-                                                f.field("Top emoji", &emoji_stats, true)
-                                                    .field("Top users", &user_stats, true)
-                                            })
-                            });
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("{}", message.author.name),
+                |e| {
+                    e.title(&stats_description).fields(|f| {
+                        f.field("Top emoji", &emoji_stats, true).field(
+                            "Top users",
+                            &user_stats,
+                            true,
+                        )
+                    })
+                },
+            );
         }
 
         BotLoopDisposition::Continue
@@ -930,16 +980,15 @@ impl Bot {
         };
 
         let user_name = match self.db.get_user_name(user_id) {
-            Ok(maybe_user_name) => {
-                match maybe_user_name {
-                    Some(user_name) => user_name,
-                    None => "(Unknown user)".to_string(),
-                }
-            }
+            Ok(maybe_user_name) => match maybe_user_name {
+                Some(user_name) => user_name,
+                None => "(Unknown user)".to_string(),
+            },
             Err(reason) => {
-                debug!("Error retrieving user name for user ({}) from database: {}",
-                       user_id,
-                       reason);
+                debug!(
+                    "Error retrieving user name for user ({}) from database: {}",
+                    user_id, reason
+                );
                 "(Unknown user)".to_string()
             }
         };
@@ -953,25 +1002,28 @@ impl Bot {
         let top_emoji = match self.db.get_user_top_emoji(&user_id, server) {
             Ok(results) => results,
             Err(reason) => {
-                warn!("Unable to retrieve top emoji used by user {} ({}): {}",
-                      user_name,
-                      user_id,
-                      reason);
+                warn!(
+                    "Unable to retrieve top emoji used by user {} ({}): {}",
+                    user_name, user_id, reason
+                );
                 self.send_response(message, RESPONSE_STATS_ERR);
                 return BotLoopDisposition::Continue;
             }
         };
 
         if top_emoji.len() == 0 {
-            self.send_response(message,
-                               &format!("I've never seen <@{}> use any emoji. :shrug:", user_id));
+            self.send_response(
+                message,
+                &format!("I've never seen <@{}> use any emoji. :shrug:", user_id),
+            );
         } else {
             let stats = create_emoji_usage_line(top_emoji);
 
-            let _ = self.discord
-                .send_embed(message.channel_id,
-                            &format!("{}", message.author.name),
-                            |e| e.fields(|f| f.field(&stats_description, &stats, false)));
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("{}", message.author.name),
+                |e| e.fields(|f| f.field(&stats_description, &stats, false)),
+            );
         }
 
         BotLoopDisposition::Continue
@@ -979,26 +1031,31 @@ impl Bot {
 
     fn stats_emoji(&self, message: &Message, emoji: &Emoji) {
         match self.db.get_emoji_usage(emoji) {
-            Ok(maybe_count) => {
-                match maybe_count {
-                    Some(count) if count > 0 => {
-                        self.send_response(message,
-                                           &format!("{} has been used {} time{}.",
-                                                   emoji.pattern(),
-                                                   count,
-                                                   if count == 1 { "" } else { "s" }));
-                    }
-                    _ => {
-                        self.send_response(message,
-                                           &format!("I've never seen anyone use {}.",
-                                                   emoji.pattern()));
-                    }
+            Ok(maybe_count) => match maybe_count {
+                Some(count) if count > 0 => {
+                    self.send_response(
+                        message,
+                        &format!(
+                            "{} has been used {} time{}.",
+                            emoji.pattern(),
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        ),
+                    );
                 }
-            }
+                _ => {
+                    self.send_response(
+                        message,
+                        &format!("I've never seen anyone use {}.", emoji.pattern()),
+                    );
+                }
+            },
             Err(reason) => {
-                warn!("Error obtaining emoji usage stats for emoji {}: {}",
-                      emoji.pattern(),
-                      reason);
+                warn!(
+                    "Error obtaining emoji usage stats for emoji {}: {}",
+                    emoji.pattern(),
+                    reason
+                );
                 self.send_response(message, RESPONSE_STATS_ERR);
             }
         }
@@ -1015,16 +1072,20 @@ fn create_emoji_usage_line(emoji_usage: Vec<(Emoji, i64)>) -> String {
     for (emoji, count) in emoji_usage {
         match emoji {
             Emoji::Custom(emoji) => {
-                stats += &format!("{} used {} time{}\n",
-                        emoji.pattern,
-                        count,
-                        if count == 1 { "" } else { "s" });
+                stats += &format!(
+                    "{} used {} time{}\n",
+                    emoji.pattern,
+                    count,
+                    if count == 1 { "" } else { "s" }
+                );
             }
             Emoji::Unicode(emoji) => {
-                stats += &format!("{} used {} time{}\n",
-                        emoji,
-                        count,
-                        if count == 1 { "" } else { "s" });
+                stats += &format!(
+                    "{} used {} time{}\n",
+                    emoji,
+                    count,
+                    if count == 1 { "" } else { "s" }
+                );
             }
         }
     }

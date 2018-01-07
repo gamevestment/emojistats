@@ -2,7 +2,7 @@ extern crate discord;
 extern crate postgres;
 
 use self::discord::model::{ChannelId, MessageId, PublicChannel, ServerId, User, UserId};
-use super::model::{Emoji, CustomEmoji};
+use super::model::{CustomEmoji, Emoji};
 use postgres::rows::Rows;
 
 pub struct Database {
@@ -11,7 +11,8 @@ pub struct Database {
 
 impl Database {
     pub fn new<T>(params: T) -> postgres::Result<Database>
-        where T: postgres::params::IntoConnectParams
+    where
+        T: postgres::params::IntoConnectParams,
     {
         let conn = postgres::Connection::connect(params, postgres::TlsMode::None)?;
         create_tables(&conn)?;
@@ -26,11 +27,14 @@ impl Database {
         ON CONFLICT (id) DO UPDATE
             SET name = excluded.name;"#;
 
-        self.conn
-            .execute(QUERY_INSERT_CHANNEL,
-                     &[&(channel.id.0 as i64),
-                       &(channel.server_id.0 as i64),
-                       &channel.name])?;
+        self.conn.execute(
+            QUERY_INSERT_CHANNEL,
+            &[
+                &(channel.id.0 as i64),
+                &(channel.server_id.0 as i64),
+                &channel.name,
+            ],
+        )?;
 
         Ok(())
     }
@@ -43,11 +47,14 @@ impl Database {
             SET name = excluded.name,
                 discriminator = excluded.discriminator;"#;
 
-        self.conn
-            .execute(QUERY_INSERT_USER,
-                     &[&(user.id.0 as i64),
-                       &user.name,
-                       &(user.discriminator as i32)])?;
+        self.conn.execute(
+            QUERY_INSERT_USER,
+            &[
+                &(user.id.0 as i64),
+                &user.name,
+                &(user.discriminator as i32),
+            ],
+        )?;
 
         Ok(())
     }
@@ -65,11 +72,14 @@ impl Database {
 
         match *emoji {
             Emoji::Custom(ref emoji) => {
-                self.conn
-                    .execute(QUERY_INSERT_CUSTOM_EMOJI,
-                             &[&(server_id.unwrap().0 as i64),
-                               &(emoji.id.0 as i64),
-                               &emoji.name])?;
+                self.conn.execute(
+                    QUERY_INSERT_CUSTOM_EMOJI,
+                    &[
+                        &(server_id.unwrap().0 as i64),
+                        &(emoji.id.0 as i64),
+                        &emoji.name,
+                    ],
+                )?;
             }
             Emoji::Unicode(ref emoji) => {
                 // Only insert Unicode emoji if they aren't already in the database
@@ -97,34 +107,38 @@ impl Database {
         Ok(result.len() != 0)
     }
 
-    pub fn record_message_stats(&self,
-                                message_id: &MessageId,
-                                channel_id: &ChannelId,
-                                user_id: &UserId,
-                                emoji_count: i32)
-                                -> postgres::Result<()> {
+    pub fn record_message_stats(
+        &self,
+        message_id: &MessageId,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+        emoji_count: i32,
+    ) -> postgres::Result<()> {
         const QUERY_RECORD_MESSAGE_STATS: &str = r#"
         INSERT INTO message (id, channel_id, user_id, emoji_count)
         VALUES ($1, $2, $3, $4);"#;
 
-        self.conn
-            .execute(QUERY_RECORD_MESSAGE_STATS,
-                     &[&(message_id.0 as i64),
-                       &(channel_id.0 as i64),
-                       &(user_id.0 as i64),
-                       &emoji_count])?;
+        self.conn.execute(
+            QUERY_RECORD_MESSAGE_STATS,
+            &[
+                &(message_id.0 as i64),
+                &(channel_id.0 as i64),
+                &(user_id.0 as i64),
+                &emoji_count,
+            ],
+        )?;
 
         Ok(())
     }
 
-    pub fn record_emoji_usage(&self,
-                              channel_id: &ChannelId,
-                              user_id: &UserId,
-                              emoji: &Emoji,
-                              count: i32)
-                              -> postgres::Result<()> {
-        const QUERY_RECORD_EMOJI_USAGE: &str =
-            r#"
+    pub fn record_emoji_usage(
+        &self,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+        emoji: &Emoji,
+        count: i32,
+    ) -> postgres::Result<()> {
+        const QUERY_RECORD_EMOJI_USAGE: &str = r#"
         INSERT INTO emoji_usage (channel_id, user_id, emoji_id, use_count)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (channel_id, user_id, emoji_id) DO UPDATE
@@ -132,37 +146,45 @@ impl Database {
 
         let emoji_id = match *emoji {
             Emoji::Custom(ref custom_emoji) => {
-                debug!("Custom emoji {} used {} time{} by {} in channel {}",
-                       custom_emoji.pattern,
-                       count,
-                       if count == 1 { "" } else { "s" },
-                       user_id,
-                       channel_id);
+                debug!(
+                    "Custom emoji {} used {} time{} by {} in channel {}",
+                    custom_emoji.pattern,
+                    count,
+                    if count == 1 { "" } else { "s" },
+                    user_id,
+                    channel_id
+                );
                 custom_emoji.id.0 as i64
             }
             Emoji::Unicode(ref emoji) => {
-                debug!("Emoji {} used {} time{} by {} in channel {}",
-                       emoji,
-                       count,
-                       if count == 1 { "" } else { "s" },
-                       user_id,
-                       channel_id);
+                debug!(
+                    "Emoji {} used {} time{} by {} in channel {}",
+                    emoji,
+                    count,
+                    if count == 1 { "" } else { "s" },
+                    user_id,
+                    channel_id
+                );
                 self.get_emoji_id(emoji.clone())?.unwrap() as i64
             }
         };
 
-        self.conn
-            .execute(QUERY_RECORD_EMOJI_USAGE,
-                     &[&(channel_id.0 as i64),
-                       &(user_id.0 as i64),
-                       &emoji_id,
-                       &count])?;
+        self.conn.execute(
+            QUERY_RECORD_EMOJI_USAGE,
+            &[
+                &(channel_id.0 as i64),
+                &(user_id.0 as i64),
+                &emoji_id,
+                &count,
+            ],
+        )?;
 
         Ok(())
     }
 
     pub fn get_emoji_id<S>(&self, name: S) -> postgres::Result<Option<u64>>
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         const QUERY_GET_EMOJI_ID: &str = r#"
         SELECT id
@@ -193,9 +215,10 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
-    pub fn get_server_top_emoji(&self,
-                                server_id: &ServerId)
-                                -> postgres::Result<Vec<(Emoji, i64)>> {
+    pub fn get_server_top_emoji(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_SERVER_EMOJI: &str = r#"
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
@@ -212,9 +235,10 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
-    pub fn get_channel_top_emoji(&self,
-                                 channel_id: &ChannelId)
-                                 -> postgres::Result<Vec<(Emoji, i64)>> {
+    pub fn get_channel_top_emoji(
+        &self,
+        channel_id: &ChannelId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_CHANNEL_EMOJI: &str = r#"
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
@@ -230,10 +254,11 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
-    pub fn get_user_top_emoji(&self,
-                              user_id: &UserId,
-                              server_id: Option<&ServerId>)
-                              -> postgres::Result<Vec<(Emoji, i64)>> {
+    pub fn get_user_top_emoji(
+        &self,
+        user_id: &UserId,
+        server_id: Option<&ServerId>,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_USER_UNICODE_EMOJI: &str = r#"
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
@@ -253,23 +278,21 @@ impl Database {
         LIMIT 5;"#;
 
         let result = match server_id {
-            Some(server_id) => {
-                self.conn
-                    .query(QUERY_SELECT_TOP_USER_SERVER_EMOJI,
-                           &[&(user_id.0 as i64), &(server_id.0 as i64)])?
-            }
-            None => {
-                self.conn
-                    .query(QUERY_SELECT_TOP_USER_UNICODE_EMOJI, &[&(user_id.0 as i64)])?
-            }
+            Some(server_id) => self.conn.query(
+                QUERY_SELECT_TOP_USER_SERVER_EMOJI,
+                &[&(user_id.0 as i64), &(server_id.0 as i64)],
+            )?,
+            None => self.conn
+                .query(QUERY_SELECT_TOP_USER_UNICODE_EMOJI, &[&(user_id.0 as i64)])?,
         };
 
         Ok(result_into_vec_emoji(result)?)
     }
 
-    pub fn get_server_top_users(&self,
-                                server_id: &ServerId)
-                                -> postgres::Result<Vec<(String, i64)>> {
+    pub fn get_server_top_users(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(String, i64)>> {
         const QUERY_SELECT_TOP_SERVER_USERS: &str = r#"
         SELECT u.name, u.discriminator, SUM(m.emoji_count)
         FROM message m
@@ -287,9 +310,10 @@ impl Database {
         Ok(result_into_vec_users(result)?)
     }
 
-    pub fn get_channel_top_users(&self,
-                                 channel_id: &ChannelId)
-                                 -> postgres::Result<Vec<(String, i64)>> {
+    pub fn get_channel_top_users(
+        &self,
+        channel_id: &ChannelId,
+    ) -> postgres::Result<Vec<(String, i64)>> {
         const QUERY_SELECT_TOP_CHANNEL_USERS: &str = r#"
         SELECT u.name, u.discriminator, SUM(m.emoji_count)
         FROM message m
@@ -319,8 +343,10 @@ impl Database {
                     Some(id) => id as i64,
                     None => {
                         // This Unicode emoji is not in the database
-                        info!("Couldn't get statistics for unknown Unicode emoji <{}>",
-                              emoji);
+                        info!(
+                            "Couldn't get statistics for unknown Unicode emoji <{}>",
+                            emoji
+                        );
                         return Ok(None);
                     }
                 }
@@ -330,12 +356,10 @@ impl Database {
         let result = self.conn.query(QUERY_EMOJI_USAGE, &[&emoji_id])?;
 
         match result.iter().next() {
-            Some(row) => {
-                match row.get::<usize, Option<i64>>(0) {
-                    Some(count) => Ok(Some(count)),
-                    None => Ok(None),
-                }
-            }
+            Some(row) => match row.get::<usize, Option<i64>>(0) {
+                Some(count) => Ok(Some(count)),
+                None => Ok(None),
+            },
             None => Ok(None),
         }
     }
@@ -413,12 +437,11 @@ fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
 
     for row in result.iter() {
         let emoji = match row.get::<usize, bool>(0) {
-            true => {
-                Emoji::Custom(CustomEmoji::new(ServerId(0),
-                                               discord::model::EmojiId(row.get::<usize, i64>(1) as
-                                                                       u64),
-                                               row.get::<usize, String>(2)))
-            }
+            true => Emoji::Custom(CustomEmoji::new(
+                ServerId(0),
+                discord::model::EmojiId(row.get::<usize, i64>(1) as u64),
+                row.get::<usize, String>(2),
+            )),
             false => Emoji::Unicode(row.get::<usize, String>(2)),
         };
 
@@ -427,7 +450,6 @@ fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
 
     Ok(vec_emoji)
 }
-
 
 fn result_into_vec_users(result: Rows) -> postgres::Result<Vec<(String, i64)>> {
     // row
