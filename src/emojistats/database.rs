@@ -215,6 +215,18 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
+    pub fn get_global_emoji_use_count(&self) -> postgres::Result<i64> {
+        const QUERY_SELECT_GLOBAL_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE e.is_custom_emoji = FALSE;"#;
+
+        let result = self.conn.query(QUERY_SELECT_GLOBAL_EMOJI_USE_COUNT, &[])?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
+    }
+
     pub fn get_server_top_emoji(
         &self,
         server_id: &ServerId,
@@ -257,6 +269,37 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
+    pub fn get_server_emoji_use_count(&self, server_id: &ServerId) -> postgres::Result<i64> {
+        const QUERY_SELECT_SERVER_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN channel c ON eu.channel_id = c.id
+        WHERE c.server_id = $1;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_SERVER_EMOJI_USE_COUNT,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
+    }
+
+    pub fn get_server_custom_emoji_use_count(&self, server_id: &ServerId) -> postgres::Result<i64> {
+        const QUERY_SELECT_SERVER_CUSTOM_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+            INNER JOIN channel c ON eu.channel_id = c.id
+            INNER JOIN emoji e ON eu.emoji_id = e.id
+        WHERE c.server_id = $1 AND e.is_custom_emoji = TRUE;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_SERVER_CUSTOM_EMOJI_USE_COUNT,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
+    }
+
     pub fn get_channel_top_emoji(
         &self,
         channel_id: &ChannelId,
@@ -274,6 +317,20 @@ impl Database {
             .query(QUERY_SELECT_TOP_CHANNEL_EMOJI, &[&(channel_id.0 as i64)])?;
 
         Ok(result_into_vec_emoji(result)?)
+    }
+
+    pub fn get_channel_emoji_use_count(&self, channel_id: &ChannelId) -> postgres::Result<i64> {
+        const QUERY_SELECT_CHANNEL_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+        WHERE eu.channel_id = $1;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_CHANNEL_EMOJI_USE_COUNT,
+            &[&(channel_id.0 as i64)],
+        )?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
     }
 
     pub fn get_user_top_emoji(
@@ -309,6 +366,36 @@ impl Database {
         };
 
         Ok(result_into_vec_emoji(result)?)
+    }
+
+    pub fn get_user_emoji_use_count(
+        &self,
+        user_id: &UserId,
+        server_id: Option<&ServerId>,
+    ) -> postgres::Result<i64> {
+        const QUERY_SELECT_USER_UNICODE_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+        WHERE eu.user_id = $1;"#;
+
+        const QUERY_SELECT_USER_SERVER_EMOJI_USE_COUNT: &str = r#"
+        SELECT SUM(eu.use_count)
+        FROM emoji_usage eu
+        INNER JOIN channel c ON eu.channel_id = c.id
+        WHERE eu.user_id = $1 AND c.server_id = $2;"#;
+
+        let result = match server_id {
+            Some(server_id) => self.conn.query(
+                QUERY_SELECT_USER_SERVER_EMOJI_USE_COUNT,
+                &[&(user_id.0 as i64), &(server_id.0 as i64)],
+            )?,
+            None => self.conn.query(
+                QUERY_SELECT_USER_UNICODE_EMOJI_USE_COUNT,
+                &[&(user_id.0 as i64)],
+            )?,
+        };
+
+        Ok(result.get(0).get::<usize, i64>(0))
     }
 
     pub fn get_server_top_users(

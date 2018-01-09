@@ -805,10 +805,22 @@ impl Bot {
         if top_emoji.len() == 0 {
             self.send_response(message, "I've never seen anyone use any emoji. :shrug:");
         } else {
-            let stats = create_emoji_usage_line(top_emoji);
+            let mut stats = create_emoji_usage_line(top_emoji);
 
             let earth_emoji_list = [":earth_africa:", ":earth_americas:", ":earth_asia:"];
             let earth = thread_rng().choose(&earth_emoji_list).unwrap();
+
+            match self.db.get_global_emoji_use_count() {
+                Ok(count) => {
+                    stats = format!(
+                        "{}\n**All in all, {} emoji have been used globally (excluding custom emoji).**",
+                        stats, count
+                    );
+                }
+                Err(reason) => {
+                    warn!("Unable to retrieve global emoji use count: {}", reason);
+                }
+            };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
@@ -871,7 +883,19 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let mut emoji_stats = create_emoji_usage_line(top_emoji);
+
+            match self.db.get_server_emoji_use_count(&server_id) {
+                Ok(count) => {
+                    emoji_stats = format!(
+                        "{}\n**All in all, {} emoji have been used on this server.**",
+                        emoji_stats, count
+                    );
+                }
+                Err(reason) => {
+                    warn!("Unable to retrieve server emoji use count: {}", reason);
+                }
+            };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
@@ -939,7 +963,22 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let custom_emoji_stats = create_emoji_usage_line(top_custom_emoji);
+            let mut custom_emoji_stats = create_emoji_usage_line(top_custom_emoji);
+
+            match self.db.get_server_custom_emoji_use_count(&server_id) {
+                Ok(count) => {
+                    custom_emoji_stats = format!(
+                        "{}\n**All in all, {} custom emoji have been used on this server.**",
+                        custom_emoji_stats, count
+                    );
+                }
+                Err(reason) => {
+                    warn!(
+                        "Unable to retrieve server custom emoji use count: {}",
+                        reason
+                    );
+                }
+            };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
@@ -1009,7 +1048,19 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let mut emoji_stats = create_emoji_usage_line(top_emoji);
+
+            match self.db.get_channel_emoji_use_count(&channel_id) {
+                Ok(count) => {
+                    emoji_stats = format!(
+                        "{}\n**All in all, {} emoji have been used in this channel.**",
+                        emoji_stats, count
+                    );
+                }
+                Err(reason) => {
+                    warn!("Unable to retrieve channel emoji use count: {}", reason);
+                }
+            };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
@@ -1083,7 +1134,35 @@ impl Bot {
                 &format!("I've never seen <@{}> use any emoji. :shrug:", user_id),
             );
         } else {
-            let stats = create_emoji_usage_line(top_emoji);
+            let mut stats = create_emoji_usage_line(top_emoji);
+
+            match self.db.get_user_emoji_use_count(&user_id, server) {
+                Ok(count) => {
+                    stats = format!(
+                        "{}\n**All in all, {} {} used {} emoji{}.**",
+                        stats,
+                        if *user_id == message.author.id {
+                            "you"
+                        } else {
+                            &user_name
+                        },
+                        if *user_id == message.author.id {
+                            "have"
+                        } else {
+                            "has"
+                        },
+                        count,
+                        if server.is_some() {
+                            " on this server"
+                        } else {
+                            ""
+                        },
+                    );
+                }
+                Err(reason) => {
+                    warn!("Unable to retrieve channel emoji use count: {}", reason);
+                }
+            };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
