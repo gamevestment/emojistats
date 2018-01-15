@@ -582,6 +582,15 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         PRIMARY KEY (channel_id, emoji_id, user_id),
         FOREIGN KEY (channel_id) REFERENCES channel (id),
         FOREIGN KEY (emoji_id) REFERENCES emoji (id)
+    );
+    CREATE TABLE IF NOT EXISTS reactions (
+        channel_id BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        emoji_id BIGINT NOT NULL,
+        PRIMARY KEY (channel_id, message_id, user_id, emoji_id),
+        FOREIGN KEY (channel_id) REFERENCES channel (id),
+        FOREIGN KEY (emoji_id) REFERENCES emoji (id)
     );"#;
 
     db_conn.batch_execute(QUERY_CREATE_TABLES)?;
