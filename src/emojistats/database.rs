@@ -182,6 +182,35 @@ impl Database {
         Ok(())
     }
 
+    pub fn record_reaction(
+        &self,
+        channel_id: &ChannelId,
+        message_id: &MessageId,
+        user_id: &UserId,
+        reaction_emoji: &Emoji,
+    ) -> postgres::Result<()> {
+        let emoji_id = match *reaction_emoji {
+            Emoji::Custom(ref custom_emoji) => {
+                debug!(
+                    "User {} responded to message {} in channel {} with emoji {}",
+                    user_id, message_id, channel_id, custom_emoji.pattern
+                );
+                custom_emoji.id.0 as i64
+            }
+            Emoji::Unicode(ref emoji) => {
+                debug!(
+                    "User {} responded to message {} in channel {} with emoji {}",
+                    user_id, message_id, channel_id, emoji
+                );
+                self.get_emoji_id(emoji.clone())?.unwrap() as i64
+            }
+        };
+
+        // TODO: Record reaction in database
+
+        Ok(())
+    }
+
     pub fn get_emoji_id<S>(&self, name: S) -> postgres::Result<Option<u64>>
     where
         S: Into<String>,

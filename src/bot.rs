@@ -14,7 +14,8 @@ use emojistats::{CustomEmoji, Database, Emoji};
 use self::chrono_humanize::HumanTime;
 use self::discord::model::{Channel, ChannelId, ChannelType, Event, Game, GameType, LiveServer,
                            Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
-                           PublicChannel, Server, ServerId, ServerInfo, User, UserId};
+                           PublicChannel, Reaction, ReactionEmoji, Server, ServerId, ServerInfo,
+                           User, UserId};
 use self::rand::{thread_rng, Rng};
 use self::time::{get_time, Timespec};
 
@@ -182,6 +183,9 @@ impl Bot {
             match self.discord_conn.recv_event() {
                 Ok(Event::MessageCreate(message)) => {
                     bot_loop_disposition = self.process_message(message);
+                }
+                Ok(Event::ReactionAdd(reaction)) => {
+                    self.log_reaction(&reaction);
                 }
                 Ok(Event::ServerCreate(server)) => match server {
                     PossibleServer::Online(server) => {
@@ -558,6 +562,37 @@ impl Bot {
                     "Error recording statistics for message {}: {}",
                     message.id, reason
                 );
+            }
+        }
+    }
+
+    fn log_reaction(&self, reaction: &Reaction) {
+        // Find the emoji used in the reaction in our own emoji list
+        let needle = match reaction.emoji {
+            ReactionEmoji::Custom { ref name, ref id } => Emoji::Custom(CustomEmoji {
+                server_id: ServerId(0),
+                id: id.clone(),
+                name: name.clone(),
+                pattern: "".into(),
+            }),
+            ReactionEmoji::Unicode(ref emoji_text) => Emoji::Unicode(emoji_text.clone()),
+        };
+
+        match self.emoji.get(&needle) {
+            Some(matching_emoji) => match self.db.record_reaction(
+                &reaction.channel_id,
+                &reaction.message_id,
+                &reaction.user_id,
+                matching_emoji,
+            ) {
+                Ok(_) => {}
+                Err(reason) => warn!(
+                    "Error recording emoji usage for message {}: {}",
+                    reaction.message_id, reason
+                ),
+            },
+            None => {
+                // Unknown emoji; ignore
             }
         }
     }
