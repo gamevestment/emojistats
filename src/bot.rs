@@ -567,6 +567,11 @@ impl Bot {
     }
 
     fn log_reaction(&self, reaction: &Reaction) {
+        // Ignore reactions in private channels
+        if !self.public_text_channels.contains_key(&reaction.channel_id) {
+            return;
+        }
+
         // Find the emoji used in the reaction in our own emoji list
         let needle = match reaction.emoji {
             ReactionEmoji::Custom { ref name, ref id } => Emoji::Custom(CustomEmoji {
