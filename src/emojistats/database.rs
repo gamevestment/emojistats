@@ -275,7 +275,7 @@ impl Database {
 
     pub fn get_global_emoji_use_count(&self) -> postgres::Result<i64> {
         const QUERY_SELECT_GLOBAL_EMOJI_USE_COUNT: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE e.is_custom_emoji = FALSE;"#;
@@ -287,7 +287,7 @@ impl Database {
 
     pub fn get_global_reaction_count(&self) -> postgres::Result<i64> {
         const QUERY_SELECT_GLOBAL_REACTION_COUNT: &str = r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(COUNT(*), 0)
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
         WHERE e.is_custom_emoji = FALSE;"#;
@@ -363,7 +363,7 @@ impl Database {
 
     pub fn get_server_emoji_use_count(&self, server_id: &ServerId) -> postgres::Result<i64> {
         const QUERY_SELECT_SERVER_EMOJI_USE_COUNT: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
             INNER JOIN channel c ON eu.channel_id = c.id
         WHERE c.server_id = $1;"#;
@@ -378,7 +378,7 @@ impl Database {
 
     pub fn get_server_reaction_count(&self, server_id: &ServerId) -> postgres::Result<i64> {
         const QUERY_SELECT_SERVER_REACTION_COUNT: &str = r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(COUNT(*), 0)
         FROM reactions r
             INNER JOIN channel c ON r.channel_id = c.id
         WHERE c.server_id = $1;"#;
@@ -426,7 +426,7 @@ impl Database {
 
     pub fn get_channel_emoji_use_count(&self, channel_id: &ChannelId) -> postgres::Result<i64> {
         const QUERY_SELECT_CHANNEL_EMOJI_USE_COUNT: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
         WHERE eu.channel_id = $1;"#;
 
@@ -479,12 +479,12 @@ impl Database {
         server_id: Option<&ServerId>,
     ) -> postgres::Result<i64> {
         const QUERY_SELECT_USER_UNICODE_EMOJI_USE_COUNT: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
         WHERE eu.user_id = $1;"#;
 
         const QUERY_SELECT_USER_SERVER_EMOJI_USE_COUNT: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
         INNER JOIN channel c ON eu.channel_id = c.id
         WHERE eu.user_id = $1 AND c.server_id = $2;"#;
@@ -570,7 +570,7 @@ impl Database {
 
     pub fn get_emoji_usage(&self, emoji: &Emoji) -> postgres::Result<Option<i64>> {
         const QUERY_EMOJI_USAGE: &str = r#"
-        SELECT SUM(eu.use_count)
+        SELECT COALESCE(SUM(eu.use_count), 0)
         FROM emoji_usage eu
         WHERE eu.emoji_id = $1;"#;
 
