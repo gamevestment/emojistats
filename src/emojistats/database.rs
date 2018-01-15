@@ -189,6 +189,11 @@ impl Database {
         user_id: &UserId,
         reaction_emoji: &Emoji,
     ) -> postgres::Result<()> {
+        const QUERY_RECORD_REACTION: &str = r#"
+        INSERT INTO reactions (channel_id, message_id, user_id, emoji_id)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (channel_id, message_id, user_id, emoji_id) DO NOTHING;"#;
+
         let emoji_id = match *reaction_emoji {
             Emoji::Custom(ref custom_emoji) => {
                 debug!(
@@ -206,7 +211,15 @@ impl Database {
             }
         };
 
-        // TODO: Record reaction in database
+        self.conn.execute(
+            QUERY_RECORD_REACTION,
+            &[
+                &(channel_id.0 as i64),
+                &(message_id.0 as i64),
+                &(user_id.0 as i64),
+                &emoji_id,
+            ],
+        )?;
 
         Ok(())
     }
