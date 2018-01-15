@@ -285,6 +285,18 @@ impl Database {
         Ok(result.get(0).get::<usize, i64>(0))
     }
 
+    pub fn get_global_reaction_count(&self) -> postgres::Result<i64> {
+        const QUERY_SELECT_GLOBAL_REACTION_COUNT: &str = r#"
+        SELECT COUNT(*)
+        FROM reactions r
+            INNER JOIN emoji e ON r.emoji_id = e.id
+        WHERE e.is_custom_emoji = FALSE;"#;
+
+        let result = self.conn.query(QUERY_SELECT_GLOBAL_REACTION_COUNT, &[])?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
+    }
+
     pub fn get_server_top_emoji(
         &self,
         server_id: &ServerId,
@@ -360,6 +372,19 @@ impl Database {
             QUERY_SELECT_SERVER_EMOJI_USE_COUNT,
             &[&(server_id.0 as i64)],
         )?;
+
+        Ok(result.get(0).get::<usize, i64>(0))
+    }
+
+    pub fn get_server_reaction_count(&self, server_id: &ServerId) -> postgres::Result<i64> {
+        const QUERY_SELECT_SERVER_REACTION_COUNT: &str = r#"
+        SELECT COUNT(*)
+        FROM reactions r
+            INNER JOIN channel c ON r.channel_id = c.id
+        WHERE c.server_id = $1;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_SERVER_REACTION_COUNT, &[&(server_id.0 as i64)])?;
 
         Ok(result.get(0).get::<usize, i64>(0))
     }
