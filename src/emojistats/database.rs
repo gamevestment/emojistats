@@ -257,6 +257,22 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
+    pub fn get_global_top_reaction_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_TOP_GLOBAL_REACTION_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, COUNT(*)
+        FROM reactions r
+            INNER JOIN emoji e ON r.emoji_id = e.id
+        WHERE e.is_custom_emoji = FALSE
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY COUNT(*) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_TOP_GLOBAL_REACTION_EMOJI, &[])?;
+
+        Ok(result_into_vec_emoji(result)?)
+    }
+
     pub fn get_global_emoji_use_count(&self) -> postgres::Result<i64> {
         const QUERY_SELECT_GLOBAL_EMOJI_USE_COUNT: &str = r#"
         SELECT SUM(eu.use_count)
@@ -305,6 +321,28 @@ impl Database {
 
         let result = self.conn.query(
             QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result_into_vec_emoji(result)?)
+    }
+
+    pub fn get_server_top_reaction_emoji(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_TOP_SERVER_REACTION_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, COUNT(*)
+        FROM reactions r
+            INNER JOIN emoji e ON r.emoji_id = e.id
+            INNER JOIN channel c ON r.channel_id = c.id
+        WHERE c.server_id = $1
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY COUNT(*) DESC
+        LIMIT 5;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_TOP_SERVER_REACTION_EMOJI,
             &[&(server_id.0 as i64)],
         )?;
 
