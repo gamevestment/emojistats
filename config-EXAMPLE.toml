@@ -13,6 +13,7 @@ help_text = """\
 @user - See the mentioned user's favourite emoji
 ***(emoji)*** - See how many times that emoji was used
 **about** - See information about the bot
+**feedback** - Send feedback to the bot administrators
 **help** - See these commands
 """
 about_text = """\
