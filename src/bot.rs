@@ -1208,17 +1208,17 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let mut emoji_stats = create_emoji_usage_line(top_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
 
-            match self.db.get_channel_emoji_use_count(&channel_id) {
-                Ok(count) => {
-                    emoji_stats = format!(
-                        "{}\n**All in all, {} emoji have been used in this channel.**",
-                        emoji_stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_channel_emoji_use_count(&channel_id) {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
                     warn!("Unable to retrieve channel emoji use count: {}", reason);
+                    "Top Emoji".to_string()
                 }
             };
 
@@ -1227,8 +1227,8 @@ impl Bot {
                 &format!("**{}**", message.author.name),
                 |e| {
                     e.title(&stats_description).fields(|f| {
-                        f.field("Top emoji", &emoji_stats, true).field(
-                            "Top users",
+                        f.field(&emoji_header, &emoji_stats, true).field(
+                            "Top Emoji Users",
                             &user_stats,
                             true,
                         )
