@@ -842,23 +842,51 @@ impl Bot {
             }
         };
 
-        if top_emoji.len() == 0 {
+        let top_reaction_emoji = match self.db.get_global_top_reaction_emoji() {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve global top used reaction emoji: {}",
+                    reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_emoji_ct = top_emoji.len();
+        let top_reaction_emoji_ct = top_reaction_emoji.len();
+
+        if (top_emoji_ct == 0) && (top_reaction_emoji_ct == 0) {
             self.send_response(message, "I've never seen anyone use any emoji. :shrug:");
         } else {
-            let mut stats = create_emoji_usage_line(top_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(top_reaction_emoji);
 
             let earth_emoji_list = [":earth_africa:", ":earth_americas:", ":earth_asia:"];
             let earth = thread_rng().choose(&earth_emoji_list).unwrap();
 
-            match self.db.get_global_emoji_use_count() {
-                Ok(count) => {
-                    stats = format!(
-                        "{}\n**All in all, {} emoji have been used globally (excluding custom emoji).**",
-                        stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_global_emoji_use_count() {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
-                    warn!("Unable to retrieve global emoji use count: {}", reason);
+                    warn!("Unable to retrieve global reaction count: {}", reason);
+                    "Top Emoji".to_string()
+                }
+            };
+
+            let reaction_emoji_header = match self.db.get_global_reaction_count() {
+                Ok(count) => format!(
+                    "Top Reaction Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
+                Err(reason) => {
+                    warn!("Unable to retrieve global reaction count: {}", reason);
+                    "Top Reaction Emoji".to_string()
                 }
             };
 
@@ -866,9 +894,20 @@ impl Bot {
                 message.channel_id,
                 &format!("**{}**", message.author.name),
                 |e| {
-                    e.fields(|f| {
-                        f.field(&format!("Top used emoji globally {}", earth), &stats, false)
-                    })
+                    e.title(&format!("Global Statistics {}", earth))
+                        .fields(|f| {
+                            if (top_emoji_ct > 0) && (top_reaction_emoji_ct > 0) {
+                                f.field(&emoji_header, &emoji_stats, true).field(
+                                    &reaction_emoji_header,
+                                    &reaction_emoji_stats,
+                                    true,
+                                )
+                            } else if top_emoji_ct > 0 {
+                                f.field(&emoji_header, &emoji_stats, true)
+                            } else {
+                                f.field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                            }
+                        })
                 },
             );
         }
