@@ -14,7 +14,8 @@ use emojistats::{CustomEmoji, Database, Emoji};
 use self::chrono_humanize::HumanTime;
 use self::discord::model::{Channel, ChannelId, ChannelType, Event, Game, GameType, LiveServer,
                            Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
-                           PublicChannel, Server, ServerId, ServerInfo, User, UserId};
+                           PublicChannel, Reaction, ReactionEmoji, Server, ServerId, ServerInfo,
+                           User, UserId};
 use self::rand::{thread_rng, Rng};
 use self::time::{get_time, Timespec};
 
@@ -182,6 +183,9 @@ impl Bot {
             match self.discord_conn.recv_event() {
                 Ok(Event::MessageCreate(message)) => {
                     bot_loop_disposition = self.process_message(message);
+                }
+                Ok(Event::ReactionAdd(reaction)) => {
+                    self.log_reaction(&reaction);
                 }
                 Ok(Event::ServerCreate(server)) => match server {
                     PossibleServer::Online(server) => {
@@ -562,6 +566,42 @@ impl Bot {
         }
     }
 
+    fn log_reaction(&self, reaction: &Reaction) {
+        // Ignore reactions in private channels
+        if !self.public_text_channels.contains_key(&reaction.channel_id) {
+            return;
+        }
+
+        // Find the emoji used in the reaction in our own emoji list
+        let needle = match reaction.emoji {
+            ReactionEmoji::Custom { ref name, ref id } => Emoji::Custom(CustomEmoji {
+                server_id: ServerId(0),
+                id: id.clone(),
+                name: name.clone(),
+                pattern: "".into(),
+            }),
+            ReactionEmoji::Unicode(ref emoji_text) => Emoji::Unicode(emoji_text.clone()),
+        };
+
+        match self.emoji.get(&needle) {
+            Some(matching_emoji) => match self.db.record_reaction(
+                &reaction.channel_id,
+                &reaction.message_id,
+                &reaction.user_id,
+                matching_emoji,
+            ) {
+                Ok(_) => {}
+                Err(reason) => warn!(
+                    "Error recording emoji usage for message {}: {}",
+                    reaction.message_id, reason
+                ),
+            },
+            None => {
+                // Unknown emoji; ignore
+            }
+        }
+    }
+
     fn process_command(&mut self, message: &Message, command: &str) -> BotLoopDisposition {
         let command = remove_non_command_characters(command);
 
@@ -802,23 +842,51 @@ impl Bot {
             }
         };
 
-        if top_emoji.len() == 0 {
+        let top_reaction_emoji = match self.db.get_global_top_reaction_emoji() {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve global top used reaction emoji: {}",
+                    reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_emoji_ct = top_emoji.len();
+        let top_reaction_emoji_ct = top_reaction_emoji.len();
+
+        if (top_emoji_ct == 0) && (top_reaction_emoji_ct == 0) {
             self.send_response(message, "I've never seen anyone use any emoji. :shrug:");
         } else {
-            let mut stats = create_emoji_usage_line(top_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(top_reaction_emoji);
 
             let earth_emoji_list = [":earth_africa:", ":earth_americas:", ":earth_asia:"];
             let earth = thread_rng().choose(&earth_emoji_list).unwrap();
 
-            match self.db.get_global_emoji_use_count() {
-                Ok(count) => {
-                    stats = format!(
-                        "{}\n**All in all, {} emoji have been used globally (excluding custom emoji).**",
-                        stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_global_emoji_use_count() {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
                     warn!("Unable to retrieve global emoji use count: {}", reason);
+                    "Top Emoji".to_string()
+                }
+            };
+
+            let reaction_emoji_header = match self.db.get_global_reaction_count() {
+                Ok(count) => format!(
+                    "Top Reaction Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
+                Err(reason) => {
+                    warn!("Unable to retrieve global reaction count: {}", reason);
+                    "Top Reaction Emoji".to_string()
                 }
             };
 
@@ -826,9 +894,20 @@ impl Bot {
                 message.channel_id,
                 &format!("**{}**", message.author.name),
                 |e| {
-                    e.fields(|f| {
-                        f.field(&format!("Top used emoji globally {}", earth), &stats, false)
-                    })
+                    e.title(&format!("Global Statistics {}", earth))
+                        .fields(|f| {
+                            if (top_emoji_ct > 0) && (top_reaction_emoji_ct > 0) {
+                                f.field(&emoji_header, &emoji_stats, true).field(
+                                    &reaction_emoji_header,
+                                    &reaction_emoji_stats,
+                                    true,
+                                )
+                            } else if top_emoji_ct > 0 {
+                                f.field(&emoji_header, &emoji_stats, true)
+                            } else {
+                                f.field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                            }
+                        })
                 },
             );
         }
@@ -863,7 +942,21 @@ impl Bot {
             }
         };
 
-        if top_emoji.len() == 0 {
+        let top_reaction_emoji = match self.db.get_server_top_reaction_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve top used reaction emoji on server ({}): {}",
+                    server_id, reason
+                );
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_emoji_ct = top_emoji.len();
+        let top_reaction_emoji_ct = top_reaction_emoji.len();
+
+        if (top_emoji_ct == 0) && (top_reaction_emoji_ct == 0) {
             self.send_response(
                 message,
                 "I've never seen anyone use any emoji on this server. :shrug:",
@@ -883,17 +976,30 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let mut emoji_stats = create_emoji_usage_line(top_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(top_reaction_emoji);
 
-            match self.db.get_server_emoji_use_count(&server_id) {
-                Ok(count) => {
-                    emoji_stats = format!(
-                        "{}\n**All in all, {} emoji have been used on this server.**",
-                        emoji_stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_server_emoji_use_count(&server_id) {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
                     warn!("Unable to retrieve server emoji use count: {}", reason);
+                    "Top Emoji".to_string()
+                }
+            };
+
+            let reaction_emoji_header = match self.db.get_server_reaction_count(&server_id) {
+                Ok(count) => format!(
+                    "Top Reaction Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
+                Err(reason) => {
+                    warn!("Unable to retrieve server reaction count: {}", reason);
+                    "Top Reaction Emoji".to_string()
                 }
             };
 
@@ -901,13 +1007,22 @@ impl Bot {
                 message.channel_id,
                 &format!("**{}**", message.author.name),
                 |e| {
-                    e.title("Statistics for this server :chart_with_upwards_trend:")
+                    e.title("Server Statistics :chart_with_upwards_trend:")
                         .fields(|f| {
-                            f.field("Top emoji", &emoji_stats, true).field(
-                                "Top users",
-                                &user_stats,
-                                true,
-                            )
+                            if (top_emoji_ct > 0) && (top_reaction_emoji_ct > 0) {
+                                f.field(&emoji_header, &emoji_stats, true)
+                                    .field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                                    .field("Top Emoji Users", &user_stats, true)
+                            } else if top_emoji_ct > 0 {
+                                f.field(&emoji_header, &emoji_stats, true).field(
+                                    "Top Emoji Users",
+                                    &user_stats,
+                                    true,
+                                )
+                            } else {
+                                f.field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                                // If there aren't any emoji stats, there aren't any top emoji users
+                            }
                         })
                 },
             );
@@ -931,7 +1046,7 @@ impl Bot {
             }
         };
 
-        let top_custom_emoji = match self.db.get_server_top_custom_emoji(&server_id) {
+        let top_emoji = match self.db.get_server_top_custom_emoji(&server_id) {
             Ok(results) => results,
             Err(reason) => {
                 warn!(
@@ -943,7 +1058,22 @@ impl Bot {
             }
         };
 
-        if top_custom_emoji.len() == 0 {
+        let top_reaction_emoji = match self.db.get_server_top_custom_reaction_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve top used custom reaction emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let top_emoji_ct = top_emoji.len();
+        let top_reaction_emoji_ct = top_reaction_emoji.len();
+
+        if (top_emoji_ct == 0) && (top_reaction_emoji_ct == 0) {
             self.send_response(
                 message,
                 "I've never seen anyone use any custom emoji on this server. :shrug:",
@@ -963,20 +1093,38 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let mut custom_emoji_stats = create_emoji_usage_line(top_custom_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(top_reaction_emoji);
 
-            match self.db.get_server_custom_emoji_use_count(&server_id) {
-                Ok(count) => {
-                    custom_emoji_stats = format!(
-                        "{}\n**All in all, {} custom emoji have been used on this server.**",
-                        custom_emoji_stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_server_custom_emoji_use_count(&server_id) {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
                     warn!(
                         "Unable to retrieve server custom emoji use count: {}",
                         reason
                     );
+                    "Top Emoji".to_string()
+                }
+            };
+
+            let reaction_emoji_header = match self.db
+                .get_server_custom_emoji_reaction_use_count(&server_id)
+            {
+                Ok(count) => format!(
+                    "Top Reaction Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
+                Err(reason) => {
+                    warn!(
+                        "Unable to retrieve server custom emoji reaction count: {}",
+                        reason
+                    );
+                    "Top Reaction Emoji".to_string()
                 }
             };
 
@@ -984,10 +1132,22 @@ impl Bot {
                 message.channel_id,
                 &format!("**{}**", message.author.name),
                 |e| {
-                    e.title("Custom emoji statistics for this server :chart_with_upwards_trend:")
+                    e.title("Server Statistics (Custom Emoji) :chart_with_upwards_trend:")
                         .fields(|f| {
-                            f.field("Top custom emoji", &custom_emoji_stats, true)
-                                .field("Top users", &user_stats, true)
+                            if (top_emoji_ct > 0) && (top_reaction_emoji_ct > 0) {
+                                f.field(&emoji_header, &emoji_stats, true)
+                                    .field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                                    .field("Top Emoji Users", &user_stats, true)
+                            } else if top_emoji_ct > 0 {
+                                f.field(&emoji_header, &emoji_stats, true).field(
+                                    "Top Emoji Users",
+                                    &user_stats,
+                                    true,
+                                )
+                            } else {
+                                f.field(&reaction_emoji_header, &reaction_emoji_stats, true)
+                                // If there aren't any emoji stats, there aren't any top emoji users
+                            }
                         })
                 },
             );
@@ -1048,17 +1208,17 @@ impl Bot {
 
             let user_stats = create_top_users_line(top_users);
 
-            let mut emoji_stats = create_emoji_usage_line(top_emoji);
+            let emoji_stats = create_emoji_usage_line(top_emoji);
 
-            match self.db.get_channel_emoji_use_count(&channel_id) {
-                Ok(count) => {
-                    emoji_stats = format!(
-                        "{}\n**All in all, {} emoji have been used in this channel.**",
-                        emoji_stats, count
-                    );
-                }
+            let emoji_header = match self.db.get_channel_emoji_use_count(&channel_id) {
+                Ok(count) => format!(
+                    "Top Emoji ({} total use{})",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ),
                 Err(reason) => {
                     warn!("Unable to retrieve channel emoji use count: {}", reason);
+                    "Top Emoji".to_string()
                 }
             };
 
@@ -1067,8 +1227,8 @@ impl Bot {
                 &format!("**{}**", message.author.name),
                 |e| {
                     e.title(&stats_description).fields(|f| {
-                        f.field("Top emoji", &emoji_stats, true).field(
-                            "Top users",
+                        f.field(&emoji_header, &emoji_stats, true).field(
+                            "Top Emoji Users",
                             &user_stats,
                             true,
                         )
@@ -1134,40 +1294,41 @@ impl Bot {
                 &format!("I've never seen <@{}> use any emoji. :shrug:", user_id),
             );
         } else {
-            let mut stats = create_emoji_usage_line(top_emoji);
+            let stats = create_emoji_usage_line(top_emoji);
 
-            match self.db.get_user_emoji_use_count(&user_id, server) {
-                Ok(count) => {
-                    stats = format!(
-                        "{}\n**All in all, {} {} used {} emoji{}.**",
-                        stats,
-                        if *user_id == message.author.id {
-                            "you"
-                        } else {
-                            &user_name
-                        },
-                        if *user_id == message.author.id {
-                            "have"
-                        } else {
-                            "has"
-                        },
-                        count,
-                        if server.is_some() {
-                            " on this server"
-                        } else {
-                            ""
-                        },
-                    );
-                }
+            let stats_header = match self.db.get_user_emoji_use_count(&user_id, server) {
+                Ok(count) => format!(
+                    "All in all, {} {} used {} emoji{}:",
+                    if *user_id == message.author.id {
+                        "you"
+                    } else {
+                        &user_name
+                    },
+                    if *user_id == message.author.id {
+                        "have"
+                    } else {
+                        "has"
+                    },
+                    count,
+                    if server.is_some() {
+                        " on this server"
+                    } else {
+                        ""
+                    },
+                ),
                 Err(reason) => {
-                    warn!("Unable to retrieve channel emoji use count: {}", reason);
+                    warn!("Unable to retrieve user emoji use count: {}", reason);
+                    "Your top emoji:".to_string()
                 }
             };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
                 &format!("**{}**", message.author.name),
-                |e| e.fields(|f| f.field(&stats_description, &stats, false)),
+                |e| {
+                    e.title(&stats_description)
+                        .fields(|f| f.field(&stats_header, &stats, false))
+                },
             );
         }
 
