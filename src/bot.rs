@@ -873,7 +873,7 @@ impl Bot {
                     if count == 1 { "" } else { "s" }
                 ),
                 Err(reason) => {
-                    warn!("Unable to retrieve global reaction count: {}", reason);
+                    warn!("Unable to retrieve global emoji use count: {}", reason);
                     "Top Emoji".to_string()
                 }
             };
