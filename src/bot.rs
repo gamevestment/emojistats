@@ -1294,40 +1294,41 @@ impl Bot {
                 &format!("I've never seen <@{}> use any emoji. :shrug:", user_id),
             );
         } else {
-            let mut stats = create_emoji_usage_line(top_emoji);
+            let stats = create_emoji_usage_line(top_emoji);
 
-            match self.db.get_user_emoji_use_count(&user_id, server) {
-                Ok(count) => {
-                    stats = format!(
-                        "{}\n**All in all, {} {} used {} emoji{}.**",
-                        stats,
-                        if *user_id == message.author.id {
-                            "you"
-                        } else {
-                            &user_name
-                        },
-                        if *user_id == message.author.id {
-                            "have"
-                        } else {
-                            "has"
-                        },
-                        count,
-                        if server.is_some() {
-                            " on this server"
-                        } else {
-                            ""
-                        },
-                    );
-                }
+            let stats_header = match self.db.get_user_emoji_use_count(&user_id, server) {
+                Ok(count) => format!(
+                    "All in all, {} {} used {} emoji{}:",
+                    if *user_id == message.author.id {
+                        "you"
+                    } else {
+                        &user_name
+                    },
+                    if *user_id == message.author.id {
+                        "have"
+                    } else {
+                        "has"
+                    },
+                    count,
+                    if server.is_some() {
+                        " on this server"
+                    } else {
+                        ""
+                    },
+                ),
                 Err(reason) => {
-                    warn!("Unable to retrieve channel emoji use count: {}", reason);
+                    warn!("Unable to retrieve user emoji use count: {}", reason);
+                    "Your top emoji:".to_string()
                 }
             };
 
             let _ = self.discord.send_embed(
                 message.channel_id,
                 &format!("**{}**", message.author.name),
-                |e| e.fields(|f| f.field(&stats_description, &stats, false)),
+                |e| {
+                    e.title(&stats_description)
+                        .fields(|f| f.field(&stats_header, &stats, false))
+                },
             );
         }
 
