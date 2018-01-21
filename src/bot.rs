@@ -426,7 +426,12 @@ impl Bot {
         let mut updated_emoji_list = Vec::<Emoji>::new();
 
         for emoji in emoji_list {
-            let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            let custom_emoji = Emoji::Custom(CustomEmoji::new(
+                server_id,
+                emoji.id,
+                emoji.name,
+                emoji.animated,
+            ));
             self.emoji.insert(custom_emoji.clone());
             updated_emoji_list.push(custom_emoji);
         }
@@ -575,6 +580,7 @@ impl Bot {
                 id: id.clone(),
                 name: name.clone(),
                 pattern: "".into(),
+                animated: false, // TODO: Obtain the correct value of "animated" for reactions from DB
             }),
             ReactionEmoji::Unicode(ref emoji_text) => Emoji::Unicode(emoji_text.clone()),
         };
