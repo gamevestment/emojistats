@@ -388,7 +388,7 @@ impl Database {
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
             INNER JOIN channel c ON eu.channel_id = c.id
-        WHERE c.server_id = $1
+        WHERE (c.server_id = $1) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
@@ -408,7 +408,7 @@ impl Database {
         FROM emoji e
             LEFT JOIN emoji_usage eu ON e.id = eu.emoji_id
             LEFT JOIN channel c ON eu.channel_id = c.id
-        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY COALESCE(SUM(eu.use_count), 0) ASC
         LIMIT 5;"#;
@@ -430,7 +430,7 @@ impl Database {
         FROM emoji e
             LEFT JOIN reactions r ON e.id = r.emoji_id
             LEFT JOIN channel c ON r.channel_id = c.id
-        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY COALESCE(COUNT(r.*), 0) ASC
         LIMIT 5;"#;
@@ -452,7 +452,7 @@ impl Database {
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
             INNER JOIN channel c ON eu.channel_id = c.id
-        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
@@ -474,7 +474,7 @@ impl Database {
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
             INNER JOIN channel c ON r.channel_id = c.id
-        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        WHERE (c.server_id = $1) AND (e.is_custom_emoji = TRUE) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY COUNT(*) DESC
         LIMIT 5;"#;
@@ -515,7 +515,7 @@ impl Database {
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
             INNER JOIN channel c ON r.channel_id = c.id
-        WHERE c.server_id = $1
+        WHERE (c.server_id = $1) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY COUNT(*) DESC
         LIMIT 5;"#;
@@ -580,7 +580,7 @@ impl Database {
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
-        WHERE eu.channel_id = $1
+        WHERE (eu.channel_id = $1) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
@@ -614,7 +614,7 @@ impl Database {
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
-        WHERE e.is_custom_emoji = FALSE AND eu.user_id = $1
+        WHERE (e.is_custom_emoji = FALSE) AND (eu.user_id = $1) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
@@ -623,7 +623,7 @@ impl Database {
         SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
-        WHERE (eu.user_id = $1) AND (e.server_id IS NULL OR e.server_id = $2)
+        WHERE (eu.user_id = $1) AND (e.server_id IS NULL OR e.server_id = $2) AND (e.is_active = TRUE)
         GROUP BY e.is_custom_emoji, e.id, e.name
         ORDER BY SUM(eu.use_count) DESC
         LIMIT 5;"#;
