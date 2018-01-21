@@ -1200,7 +1200,7 @@ impl Bot {
         if (least_used_emoji_ct == 0) && (least_used_reaction_emoji_ct == 0) {
             self.send_response(
                 message,
-                "I've never seen anyone use any custom emoji on this server. :shrug:",
+                "It looks like there aren't any custom emoji on this server. :shrug:",
             );
         } else {
             let emoji_stats = create_emoji_usage_line(least_used_emoji);
