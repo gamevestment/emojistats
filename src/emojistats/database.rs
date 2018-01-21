@@ -106,9 +106,9 @@ impl Database {
         WHERE (e.server_id = $1) AND (e.is_active = TRUE);"#;
 
         const QUERY_PRUNE_EMOJI: &str = r#"
-        UPDATE emoji e
-        SET e.is_active = FALSE
-        WHERE e.id = $1;"#;
+        UPDATE emoji
+        SET is_active = FALSE
+        WHERE id = $1;"#;
 
         let result = self.conn
             .query(QUERY_SELECT_SERVER_CUSTOM_EMOJI, &[&(server_id.0 as i64)]);
@@ -126,14 +126,30 @@ impl Database {
                 // Prune emoji that are NOT in the updated emoji list
                 let pruned_emoji_ids: Vec<u64> = db_emoji_ids
                     .into_iter()
-                    .filter(|id| {
-                        // TODO: return true if the id is NOT in the update emoji list
-                        true
+                    .filter(|db_emoji_id| {
+                        // Find the number of times the database emoji IS in the updated emoji list
+                        let matches = emoji_list
+                            .iter()
+                            .filter(|emoji| match *emoji {
+                                &Emoji::Custom(ref emoji) => emoji.id.0 == *db_emoji_id,
+                                &Emoji::Unicode(_) => false,
+                            })
+                            .count();
+
+                        // Return true if the database emoji IS NOT in the updated emoji list
+                        matches == 0
                     })
                     .collect();
 
                 pruned_emoji_ids.into_iter().for_each(|id| {
                     debug!("Pruning emoji with ID: {}", id);
+
+                    match self.conn.execute(QUERY_PRUNE_EMOJI, &[&(id as i64)]) {
+                        Ok(_) => {}
+                        Err(reason) => {
+                            warn!("Error pruning emoji with ID {}: {}", id, reason);
+                        }
+                    }
                 });
             }
             Err(reason) => {
@@ -142,7 +158,20 @@ impl Database {
         }
 
         for ref emoji in emoji_list {
-            self.add_emoji(emoji, Some(server_id));
+            match self.add_emoji(emoji, Some(server_id)) {
+                Ok(_) => {
+                    debug!(
+                        "Added custom emoji on server ({}): <{:?}>",
+                        server_id, emoji
+                    );
+                }
+                Err(reason) => {
+                    warn!(
+                        "Error adding custom emoji <{:?}> to database: {}",
+                        emoji, reason
+                    );
+                }
+            }
         }
 
         Ok(())
