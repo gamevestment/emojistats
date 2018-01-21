@@ -189,7 +189,7 @@ impl Bot {
                 }
                 Ok(Event::ServerCreate(server)) => match server {
                     PossibleServer::Online(server) => {
-                        self.add_emoji_list(server.id, server.emojis.clone());
+                        self.update_emoji_list(server.id, server.emojis.clone());
                         self.add_live_server(server);
                     }
                     PossibleServer::Offline(_) => {}
@@ -221,7 +221,7 @@ impl Bot {
                     self.add_user(&user);
                 }
                 Ok(Event::ServerEmojisUpdate(server_id, emoji_list)) => {
-                    self.add_emoji_list(server_id, emoji_list);
+                    self.update_emoji_list(server_id, emoji_list);
                 }
                 _ => {}
             }
@@ -295,7 +295,7 @@ impl Bot {
     }
 
     fn update_server(&mut self, new_server_info: Server) {
-        self.add_emoji_list(new_server_info.id, new_server_info.emojis);
+        self.update_emoji_list(new_server_info.id, new_server_info.emojis);
 
         if let Some(server) = self.servers.get_mut(&new_server_info.id) {
             debug!(
@@ -422,26 +422,22 @@ impl Bot {
         }
     }
 
-    fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
+    fn update_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
+        let mut updated_emoji_list = Vec::<Emoji>::new();
+
         for emoji in emoji_list {
             let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            self.emoji.insert(custom_emoji.clone());
+            updated_emoji_list.push(custom_emoji);
+        }
 
-            match self.db.add_emoji(&custom_emoji, Some(&server_id)) {
-                Ok(_) => {
-                    debug!(
-                        "Added custom emoji on server ({}): <{:?}>",
-                        server_id, custom_emoji
-                    );
-                }
-                Err(reason) => {
-                    warn!(
-                        "Error adding custom emoji <{:?}> to database: {}",
-                        custom_emoji, reason
-                    );
-                }
+        match self.db
+            .update_server_emoji_list(&updated_emoji_list, &server_id)
+        {
+            Ok(_) => {}
+            Err(reason) => {
+                warn!("Error updating server emoji list: {}", reason);
             }
-
-            self.emoji.insert(custom_emoji);
         }
     }
 
@@ -621,6 +617,7 @@ impl Bot {
                     "c" | "channel" => self.stats_channel(message, None),
                     "m" | "me" => self.stats_user(message, None),
                     "u" | "custom" => self.stats_server_custom(message),
+                    "l" | "least-used" => self.stats_server_least_used_custom_emoji(message),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
@@ -1149,6 +1146,85 @@ impl Bot {
                                 // If there aren't any emoji stats, there aren't any top emoji users
                             }
                         })
+                },
+            );
+        }
+
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_server_least_used_custom_emoji(&self, message: &Message) -> BotLoopDisposition {
+        if self.private_channels.contains_key(&message.channel_id) {
+            self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
+            return BotLoopDisposition::Continue;
+        }
+
+        let server_id = match self.public_text_channels.get(&message.channel_id) {
+            Some(channel) => channel.server_id,
+            None => {
+                warn!("Unknown public text channel ({})", message.channel_id);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_emoji = match self.db.get_server_least_used_custom_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve least used custom emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_reaction_emoji = match self.db
+            .get_server_least_used_custom_reaction_emoji(&server_id)
+        {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve least used custom reaction emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_emoji_ct = least_used_emoji.len();
+        let least_used_reaction_emoji_ct = least_used_reaction_emoji.len();
+
+        if (least_used_emoji_ct == 0) && (least_used_reaction_emoji_ct == 0) {
+            self.send_response(
+                message,
+                "It looks like there aren't any custom emoji on this server. :shrug:",
+            );
+        } else {
+            let emoji_stats = create_emoji_usage_line(least_used_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(least_used_reaction_emoji);
+
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("**{}**", message.author.name),
+                |e| {
+                    e.title(
+                        "Server Statistics (Least Used Custom Emoji) :chart_with_downwards_trend:",
+                    ).fields(|f| {
+                        if (least_used_emoji_ct > 0) && (least_used_reaction_emoji_ct > 0) {
+                            f.field(&"Emoji", &emoji_stats, true).field(
+                                &"Reactions",
+                                &reaction_emoji_stats,
+                                true,
+                            )
+                        } else if least_used_emoji_ct > 0 {
+                            f.field(&"Emoji", &emoji_stats, true)
+                        } else {
+                            f.field(&"Reactions", &reaction_emoji_stats, true)
+                        }
+                    })
                 },
             );
         }
