@@ -97,7 +97,7 @@ impl Database {
 
     pub fn update_server_emoji_list(
         &self,
-        emoji: &Vec<Emoji>,
+        emoji_list: &Vec<Emoji>,
         server_id: &ServerId,
     ) -> postgres::Result<()> {
         const QUERY_SELECT_SERVER_CUSTOM_EMOJI: &str = r#"
@@ -109,12 +109,6 @@ impl Database {
         UPDATE emoji e
         SET e.is_active = FALSE
         WHERE e.id = $1;"#;
-
-        const QUERY_INSERT_CUSTOM_EMOJI: &str = r#"
-        INSERT INTO emoji (server_id, id, name, is_custom_emoji)
-        VALUES ($1, $2, $3, TRUE)
-        ON CONFLICT (id) DO UPDATE
-            SET name = excluded.name;"#;
 
         let result = self.conn
             .query(QUERY_SELECT_SERVER_CUSTOM_EMOJI, &[&(server_id.0 as i64)]);
@@ -147,8 +141,9 @@ impl Database {
             }
         }
 
-        // Add the emoji to the database
-        // TODO
+        for ref emoji in emoji_list {
+            self.add_emoji(emoji, Some(server_id));
+        }
 
         Ok(())
     }
