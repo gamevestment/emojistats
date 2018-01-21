@@ -12,10 +12,10 @@ use bot_utility::{extract_first_word, extract_preceding_arg, remove_non_command_
 use emojistats::{CustomEmoji, Database, Emoji};
 
 use self::chrono_humanize::HumanTime;
-use self::discord::model::{Channel, ChannelId, ChannelType, Event, Game, GameType, LiveServer,
-                           Message, MessageType, OnlineStatus, PossibleServer, PrivateChannel,
-                           PublicChannel, Reaction, ReactionEmoji, Server, ServerId, ServerInfo,
-                           User, UserId};
+use self::discord::model::{Channel, ChannelId, ChannelType, EmojiId, Event, Game, GameType,
+                           LiveServer, Message, MessageType, OnlineStatus, PossibleServer,
+                           PrivateChannel, PublicChannel, Reaction, ReactionEmoji, Server,
+                           ServerId, ServerInfo, User, UserId};
 use self::rand::{thread_rng, Rng};
 use self::time::{get_time, Timespec};
 
@@ -426,7 +426,12 @@ impl Bot {
         let mut updated_emoji_list = Vec::<Emoji>::new();
 
         for emoji in emoji_list {
-            let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            let custom_emoji = Emoji::Custom(CustomEmoji::new(
+                server_id,
+                emoji.id,
+                emoji.name,
+                emoji.animated,
+            ));
             self.emoji.insert(custom_emoji.clone());
             updated_emoji_list.push(custom_emoji);
         }
@@ -568,33 +573,28 @@ impl Bot {
             return;
         }
 
-        // Find the emoji used in the reaction in our own emoji list
-        let needle = match reaction.emoji {
-            ReactionEmoji::Custom { ref name, ref id } => Emoji::Custom(CustomEmoji {
-                server_id: ServerId(0),
-                id: id.clone(),
-                name: name.clone(),
-                pattern: "".into(),
-            }),
+        let reaction_emoji = match reaction.emoji {
+            ReactionEmoji::Custom { ref id, .. } => match self.get_emoji_by_id(id) {
+                Some(emoji) => emoji.clone(),
+                None => {
+                    // Unknown emoji; ignore
+                    return;
+                }
+            },
             ReactionEmoji::Unicode(ref emoji_text) => Emoji::Unicode(emoji_text.clone()),
         };
 
-        match self.emoji.get(&needle) {
-            Some(matching_emoji) => match self.db.record_reaction(
-                &reaction.channel_id,
-                &reaction.message_id,
-                &reaction.user_id,
-                matching_emoji,
-            ) {
-                Ok(_) => {}
-                Err(reason) => warn!(
-                    "Error recording emoji usage for message {}: {}",
-                    reaction.message_id, reason
-                ),
-            },
-            None => {
-                // Unknown emoji; ignore
-            }
+        match self.db.record_reaction(
+            &reaction.channel_id,
+            &reaction.message_id,
+            &reaction.user_id,
+            &reaction_emoji,
+        ) {
+            Ok(_) => {}
+            Err(reason) => warn!(
+                "Error recording emoji usage for message {}: {}",
+                reaction.message_id, reason
+            ),
         }
     }
 
@@ -1445,6 +1445,16 @@ impl Bot {
 
     fn respond_auth_required(&self, message: &Message) {
         self.send_response(message, "Please authenticate first. :lock:");
+    }
+
+    fn get_emoji_by_id(&self, id: &EmojiId) -> Option<&Emoji> {
+        return self.emoji
+            .iter()
+            .filter(|emoji| match *emoji {
+                &Emoji::Custom(ref emoji) => emoji.id == *id,
+                &Emoji::Unicode(_) => false,
+            })
+            .next();
     }
 }
 

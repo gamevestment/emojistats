@@ -17,7 +17,7 @@ default-features = false
 features = ["file_appender", "pattern_encoder"]
 
 [dependencies.discord]
-git = "https://github.com/SpaceManiac/discord-rs"
+git = "https://github.com/quailiff/discord-rs"
 #version = "0.8.0"
 default-features = false
 

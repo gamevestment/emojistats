@@ -31,6 +31,7 @@ pub struct CustomEmoji {
     pub server_id: ServerId,
     pub id: EmojiId,
     pub name: String,
+    pub animated: bool,
     pub pattern: String,
 }
 
@@ -50,17 +51,18 @@ impl PartialEq for CustomEmoji {
 }
 
 impl CustomEmoji {
-    pub fn new<S>(server_id: ServerId, id: EmojiId, name: S) -> CustomEmoji
+    pub fn new<S>(server_id: ServerId, id: EmojiId, name: S, animated: bool) -> CustomEmoji
     where
         S: Into<String>,
     {
         let name = name.into();
-        let pattern = format!("<:{}:{}>", name, id);
+        let pattern = format!("<{}:{}:{}>", if animated { "a" } else { "" }, name, id);
 
         CustomEmoji {
             server_id,
             id,
             name,
+            animated,
             pattern,
         }
     }

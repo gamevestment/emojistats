@@ -61,14 +61,14 @@ impl Database {
 
     pub fn add_emoji(&self, emoji: &Emoji, server_id: Option<&ServerId>) -> postgres::Result<()> {
         const QUERY_INSERT_CUSTOM_EMOJI: &str = r#"
-        INSERT INTO emoji (server_id, id, name, is_custom_emoji)
-        VALUES ($1, $2, $3, TRUE)
+        INSERT INTO emoji (server_id, id, name, is_custom_emoji, is_animated)
+        VALUES ($1, $2, $3, TRUE, $4)
         ON CONFLICT (id) DO UPDATE
-            SET name = excluded.name;"#;
+            SET name = excluded.name, is_animated = excluded.is_animated;"#;
 
         const QUERY_INSERT_UNICODE_EMOJI: &str = r#"
-        INSERT INTO emoji (server_id, name, is_custom_emoji)
-        VALUES (NULL, $1, FALSE);"#;
+        INSERT INTO emoji (server_id, name, is_custom_emoji, is_animated)
+        VALUES (NULL, $1, FALSE, FALSE);"#;
 
         match *emoji {
             Emoji::Custom(ref emoji) => {
@@ -78,6 +78,7 @@ impl Database {
                         &(server_id.unwrap().0 as i64),
                         &(emoji.id.0 as i64),
                         &emoji.name,
+                        &emoji.animated,
                     ],
                 )?;
             }
@@ -326,7 +327,7 @@ impl Database {
 
     pub fn get_global_top_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_GLOBAL_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE e.is_custom_emoji = FALSE
@@ -341,7 +342,7 @@ impl Database {
 
     pub fn get_global_top_reaction_emoji(&self) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_GLOBAL_REACTION_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, COUNT(*)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, COUNT(*)
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
         WHERE e.is_custom_emoji = FALSE
@@ -384,7 +385,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_SERVER_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
             INNER JOIN channel c ON eu.channel_id = c.id
@@ -404,7 +405,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_LEAST_USED_SERVER_CUSTOM_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, COALESCE(SUM(eu.use_count), 0)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, COALESCE(SUM(eu.use_count), 0)
         FROM emoji e
             LEFT JOIN emoji_usage eu ON e.id = eu.emoji_id
             LEFT JOIN channel c ON eu.channel_id = c.id
@@ -426,7 +427,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_LEAST_USED_SERVER_REACTION_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, COALESCE(COUNT(r.*), 0)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, COALESCE(COUNT(r.*), 0)
         FROM emoji e
             LEFT JOIN reactions r ON e.id = r.emoji_id
             LEFT JOIN channel c ON r.channel_id = c.id
@@ -448,7 +449,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_SERVER_CUSTOM_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
             INNER JOIN channel c ON eu.channel_id = c.id
@@ -470,7 +471,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_SERVER_REACTION_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, COUNT(*)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, COUNT(*)
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
             INNER JOIN channel c ON r.channel_id = c.id
@@ -511,7 +512,7 @@ impl Database {
         server_id: &ServerId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_SERVER_REACTION_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, COUNT(*)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, COUNT(*)
         FROM reactions r
             INNER JOIN emoji e ON r.emoji_id = e.id
             INNER JOIN channel c ON r.channel_id = c.id
@@ -577,7 +578,7 @@ impl Database {
         channel_id: &ChannelId,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_CHANNEL_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE (eu.channel_id = $1) AND (e.is_active = TRUE)
@@ -611,7 +612,7 @@ impl Database {
         server_id: Option<&ServerId>,
     ) -> postgres::Result<Vec<(Emoji, i64)>> {
         const QUERY_SELECT_TOP_USER_UNICODE_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE (e.is_custom_emoji = FALSE) AND (eu.user_id = $1) AND (e.is_active = TRUE)
@@ -620,7 +621,7 @@ impl Database {
         LIMIT 5;"#;
 
         const QUERY_SELECT_TOP_USER_SERVER_EMOJI: &str = r#"
-        SELECT e.is_custom_emoji, e.id, e.name, SUM(eu.use_count)
+        SELECT e.is_custom_emoji, e.id, e.name, e.is_animated, SUM(eu.use_count)
         FROM emoji_usage eu
             INNER JOIN emoji e ON eu.emoji_id = e.id
         WHERE (eu.user_id = $1) AND (e.server_id IS NULL OR e.server_id = $2) AND (e.is_active = TRUE)
@@ -795,6 +796,7 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         name VARCHAR(512) NOT NULL,
         is_custom_emoji BOOL NOT NULL,
         is_active BOOL NOT NULL DEFAULT TRUE,
+        is_animated BOOL NOT NULL,
         PRIMARY KEY (id)
     );
     CREATE TABLE IF NOT EXISTS channel (
@@ -847,7 +849,8 @@ fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
     // column 0: is_custom_emoji
     // column 1: emoji ID
     // column 2: emoji name
-    // column 3: use count
+    // column 3: is animated
+    // column 4: use count
     let mut vec_emoji = Vec::new();
 
     for row in result.iter() {
@@ -856,11 +859,12 @@ fn result_into_vec_emoji(result: Rows) -> postgres::Result<Vec<(Emoji, i64)>> {
                 ServerId(0),
                 discord::model::EmojiId(row.get::<usize, i64>(1) as u64),
                 row.get::<usize, String>(2),
+                row.get::<usize, bool>(3),
             )),
             false => Emoji::Unicode(row.get::<usize, String>(2)),
         };
 
-        vec_emoji.push((emoji, row.get::<usize, i64>(3)));
+        vec_emoji.push((emoji, row.get::<usize, i64>(4)));
     }
 
     Ok(vec_emoji)
