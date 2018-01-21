@@ -3,7 +3,7 @@ extern crate discord;
 use std::hash::{Hash, Hasher};
 use self::discord::model::{EmojiId, ServerId};
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum Emoji {
     Custom(CustomEmoji),
     Unicode(String), // Some emoji span multiple chars
@@ -26,7 +26,7 @@ impl Emoji {
     }
 }
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct CustomEmoji {
     pub server_id: ServerId,
     pub id: EmojiId,

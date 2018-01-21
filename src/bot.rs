@@ -189,8 +189,6 @@ impl Bot {
                 }
                 Ok(Event::ServerCreate(server)) => match server {
                     PossibleServer::Online(server) => {
-                        // TODO: Remove the call to add_emoji_list()
-                        self.add_emoji_list(server.id, server.emojis.clone());
                         self.update_emoji_list(server.id, server.emojis.clone());
                         self.add_live_server(server);
                     }
@@ -223,8 +221,6 @@ impl Bot {
                     self.add_user(&user);
                 }
                 Ok(Event::ServerEmojisUpdate(server_id, emoji_list)) => {
-                    // TODO: Remove the call to add_emoji_list()
-                    self.add_emoji_list(server_id, emoji_list.clone());
                     self.update_emoji_list(server_id, emoji_list);
                 }
                 _ => {}
@@ -299,7 +295,7 @@ impl Bot {
     }
 
     fn update_server(&mut self, new_server_info: Server) {
-        self.add_emoji_list(new_server_info.id, new_server_info.emojis);
+        self.update_emoji_list(new_server_info.id, new_server_info.emojis);
 
         if let Some(server) = self.servers.get_mut(&new_server_info.id) {
             debug!(
@@ -426,36 +422,12 @@ impl Bot {
         }
     }
 
-    fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
-        // TODO: Remove this function - only use update_emoji_list()
-
-        for emoji in emoji_list {
-            let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
-
-            match self.db.add_emoji(&custom_emoji, Some(&server_id)) {
-                Ok(_) => {
-                    debug!(
-                        "Added custom emoji on server ({}): <{:?}>",
-                        server_id, custom_emoji
-                    );
-                }
-                Err(reason) => {
-                    warn!(
-                        "Error adding custom emoji <{:?}> to database: {}",
-                        custom_emoji, reason
-                    );
-                }
-            }
-
-            self.emoji.insert(custom_emoji);
-        }
-    }
-
     fn update_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
         let mut updated_emoji_list = Vec::<Emoji>::new();
 
         for emoji in emoji_list {
             let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            self.emoji.insert(custom_emoji.clone());
             updated_emoji_list.push(custom_emoji);
         }
 
