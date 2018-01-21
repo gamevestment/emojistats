@@ -189,7 +189,9 @@ impl Bot {
                 }
                 Ok(Event::ServerCreate(server)) => match server {
                     PossibleServer::Online(server) => {
+                        // TODO: Remove the call to add_emoji_list()
                         self.add_emoji_list(server.id, server.emojis.clone());
+                        self.update_emoji_list(server.id, server.emojis.clone());
                         self.add_live_server(server);
                     }
                     PossibleServer::Offline(_) => {}
@@ -221,7 +223,9 @@ impl Bot {
                     self.add_user(&user);
                 }
                 Ok(Event::ServerEmojisUpdate(server_id, emoji_list)) => {
-                    self.add_emoji_list(server_id, emoji_list);
+                    // TODO: Remove the call to add_emoji_list()
+                    self.add_emoji_list(server_id, emoji_list.clone());
+                    self.update_emoji_list(server_id, emoji_list);
                 }
                 _ => {}
             }
@@ -423,6 +427,8 @@ impl Bot {
     }
 
     fn add_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
+        // TODO: Remove this function - only use update_emoji_list()
+
         for emoji in emoji_list {
             let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
 
@@ -442,6 +448,24 @@ impl Bot {
             }
 
             self.emoji.insert(custom_emoji);
+        }
+    }
+
+    fn update_emoji_list(&mut self, server_id: ServerId, emoji_list: Vec<discord::model::Emoji>) {
+        let mut updated_emoji_list = Vec::<Emoji>::new();
+
+        for emoji in emoji_list {
+            let custom_emoji = Emoji::Custom(CustomEmoji::new(server_id, emoji.id, emoji.name));
+            updated_emoji_list.push(custom_emoji);
+        }
+
+        match self.db
+            .update_server_emoji_list(&updated_emoji_list, &server_id)
+        {
+            Ok(_) => {}
+            Err(reason) => {
+                warn!("Error updating server emoji list: {}", reason);
+            }
         }
     }
 

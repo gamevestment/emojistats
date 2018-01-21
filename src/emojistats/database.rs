@@ -95,6 +95,64 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_server_emoji_list(
+        &self,
+        emoji: &Vec<Emoji>,
+        server_id: &ServerId,
+    ) -> postgres::Result<()> {
+        const QUERY_SELECT_SERVER_CUSTOM_EMOJI: &str = r#"
+        SELECT e.id
+        FROM emoji e
+        WHERE (e.server_id = $1) AND (e.is_active = TRUE);"#;
+
+        const QUERY_PRUNE_EMOJI: &str = r#"
+        UPDATE emoji e
+        SET e.is_active = FALSE
+        WHERE e.id = $1;"#;
+
+        const QUERY_INSERT_CUSTOM_EMOJI: &str = r#"
+        INSERT INTO emoji (server_id, id, name, is_custom_emoji)
+        VALUES ($1, $2, $3, TRUE)
+        ON CONFLICT (id) DO UPDATE
+            SET name = excluded.name;"#;
+
+        let result = self.conn
+            .query(QUERY_SELECT_SERVER_CUSTOM_EMOJI, &[&(server_id.0 as i64)]);
+
+        match result {
+            Ok(rows) => {
+                debug!("Pruning old emoji on server {}", server_id);
+
+                // Retrieve list of custom emoji for this server
+                let mut db_emoji_ids = Vec::new();
+                rows.into_iter().for_each(|row| {
+                    db_emoji_ids.push(row.get::<usize, i64>(0) as u64);
+                });
+
+                // Prune emoji that are NOT in the updated emoji list
+                let pruned_emoji_ids: Vec<u64> = db_emoji_ids
+                    .into_iter()
+                    .filter(|id| {
+                        // TODO: return true if the id is NOT in the update emoji list
+                        true
+                    })
+                    .collect();
+
+                pruned_emoji_ids.into_iter().for_each(|id| {
+                    debug!("Pruning emoji with ID: {}", id);
+                });
+            }
+            Err(reason) => {
+                warn!("Error retrieving list of emoji: {}", reason);
+            }
+        }
+
+        // Add the emoji to the database
+        // TODO
+
+        Ok(())
+    }
+
     pub fn message_exists(&self, message_id: &MessageId) -> postgres::Result<bool> {
         const QUERY_GET_MESSAGE_EXIST: &str = r#"
         SELECT id
@@ -712,6 +770,7 @@ fn create_tables(db_conn: &postgres::Connection) -> postgres::Result<()> {
         id BIGSERIAL NOT NULL,
         name VARCHAR(512) NOT NULL,
         is_custom_emoji BOOL NOT NULL,
+        is_active BOOL NOT NULL DEFAULT TRUE,
         PRIMARY KEY (id)
     );
     CREATE TABLE IF NOT EXISTS channel (
