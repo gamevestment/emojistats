@@ -21,6 +21,7 @@ To invoke a command, mention the bot at the beginning of the message; for exampl
 |global|See global emoji statistics|
 |server|See the top emoji and users on this server|
 |custom|See the top custom emoji and custom emoji users on this server|
+|least-used|See the least-used custom emoji on this server|
 |channel|See the top emoji and users in this channel|
 |me|See your favourite emoji|
 |`#channel`|See the top emoji and users in that channel|
