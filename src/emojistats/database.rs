@@ -317,6 +317,50 @@ impl Database {
         Ok(result_into_vec_emoji(result)?)
     }
 
+    pub fn get_server_least_used_custom_emoji(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_LEAST_USED_SERVER_CUSTOM_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, COALESCE(SUM(eu.use_count), 0)
+        FROM emoji e
+            LEFT JOIN emoji_usage eu ON e.id = eu.emoji_id
+            LEFT JOIN channel c ON eu.channel_id = c.id
+        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY COALESCE(SUM(eu.use_count), 0) ASC
+        LIMIT 5;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_LEAST_USED_SERVER_CUSTOM_EMOJI,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result_into_vec_emoji(result)?)
+    }
+
+    pub fn get_server_least_used_custom_reaction_emoji(
+        &self,
+        server_id: &ServerId,
+    ) -> postgres::Result<Vec<(Emoji, i64)>> {
+        const QUERY_SELECT_LEAST_USED_SERVER_REACTION_EMOJI: &str = r#"
+        SELECT e.is_custom_emoji, e.id, e.name, COALESCE(COUNT(r.*), 0)
+        FROM emoji e
+            LEFT JOIN reactions r ON e.id = r.emoji_id
+            LEFT JOIN channel c ON r.channel_id = c.id
+        WHERE (e.server_id = $1) AND (e.is_custom_emoji = TRUE)
+        GROUP BY e.is_custom_emoji, e.id, e.name
+        ORDER BY COALESCE(COUNT(r.*), 0) ASC
+        LIMIT 5;"#;
+
+        let result = self.conn.query(
+            QUERY_SELECT_LEAST_USED_SERVER_REACTION_EMOJI,
+            &[&(server_id.0 as i64)],
+        )?;
+
+        Ok(result_into_vec_emoji(result)?)
+    }
+
     pub fn get_server_top_custom_emoji(
         &self,
         server_id: &ServerId,

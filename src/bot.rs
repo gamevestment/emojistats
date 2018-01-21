@@ -621,6 +621,7 @@ impl Bot {
                     "c" | "channel" => self.stats_channel(message, None),
                     "m" | "me" => self.stats_user(message, None),
                     "u" | "custom" => self.stats_server_custom(message),
+                    "l" | "least-used" => self.stats_server_least_used_custom_emoji(message),
                     _ => {
                         // Something else
                         // Did the user begin the message with a #channel or mention a user?
@@ -1149,6 +1150,85 @@ impl Bot {
                                 // If there aren't any emoji stats, there aren't any top emoji users
                             }
                         })
+                },
+            );
+        }
+
+        BotLoopDisposition::Continue
+    }
+
+    fn stats_server_least_used_custom_emoji(&self, message: &Message) -> BotLoopDisposition {
+        if self.private_channels.contains_key(&message.channel_id) {
+            self.send_response(message, RESPONSE_USE_COMMAND_IN_PUBLIC_CHANNEL);
+            return BotLoopDisposition::Continue;
+        }
+
+        let server_id = match self.public_text_channels.get(&message.channel_id) {
+            Some(channel) => channel.server_id,
+            None => {
+                warn!("Unknown public text channel ({})", message.channel_id);
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_emoji = match self.db.get_server_least_used_custom_emoji(&server_id) {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve least used custom emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_reaction_emoji = match self.db
+            .get_server_least_used_custom_reaction_emoji(&server_id)
+        {
+            Ok(results) => results,
+            Err(reason) => {
+                warn!(
+                    "Unable to retrieve least used custom reaction emoji on server ({}): {}",
+                    server_id, reason
+                );
+                self.send_response(message, RESPONSE_STATS_ERR);
+                return BotLoopDisposition::Continue;
+            }
+        };
+
+        let least_used_emoji_ct = least_used_emoji.len();
+        let least_used_reaction_emoji_ct = least_used_reaction_emoji.len();
+
+        if (least_used_emoji_ct == 0) && (least_used_reaction_emoji_ct == 0) {
+            self.send_response(
+                message,
+                "I've never seen anyone use any custom emoji on this server. :shrug:",
+            );
+        } else {
+            let emoji_stats = create_emoji_usage_line(least_used_emoji);
+            let reaction_emoji_stats = create_emoji_usage_line(least_used_reaction_emoji);
+
+            let _ = self.discord.send_embed(
+                message.channel_id,
+                &format!("**{}**", message.author.name),
+                |e| {
+                    e.title(
+                        "Server Statistics (Least Used Custom Emoji) :chart_with_downwards_trend:",
+                    ).fields(|f| {
+                        if (least_used_emoji_ct > 0) && (least_used_reaction_emoji_ct > 0) {
+                            f.field(&"Emoji", &emoji_stats, true).field(
+                                &"Reactions",
+                                &reaction_emoji_stats,
+                                true,
+                            )
+                        } else if least_used_emoji_ct > 0 {
+                            f.field(&"Emoji", &emoji_stats, true)
+                        } else {
+                            f.field(&"Reactions", &reaction_emoji_stats, true)
+                        }
+                    })
                 },
             );
         }
