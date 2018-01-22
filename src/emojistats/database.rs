@@ -290,7 +290,13 @@ impl Database {
                     "User {} responded to message {} in channel {} with emoji {}",
                     user_id, message_id, channel_id, emoji
                 );
-                self.get_emoji_id(emoji.clone())?.unwrap() as i64
+                match self.get_emoji_id(emoji.clone())? {
+                    Some(id) => id as i64,
+                    None => {
+                        // Someone reacted with a Unicode emoji that we don't know about; ignore it
+                        return Ok(());
+                    }
+                }
             }
         };
 
