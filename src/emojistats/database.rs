@@ -248,7 +248,16 @@ impl Database {
                     user_id,
                     channel_id
                 );
-                self.get_emoji_id(emoji.clone())?.unwrap() as i64
+                match self.get_emoji_id(emoji.clone())? {
+                    Some(id) => id as i64,
+                    None => {
+                        warn!(
+                            "Failed to retrieve database ID for Unicode emoji <{}>",
+                            emoji
+                        );
+                        return Ok(());
+                    }
+                }
             }
         };
 
